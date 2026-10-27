@@ -3,13 +3,14 @@
 
 import type { PageSnapshot } from "../content/candidates";
 import type { Tone } from "../content/overlay";
+import type { ElementRef, HistoryEdge } from "./history";
 import type { Settings } from "./settings";
 import type { Suggestion } from "./suggest";
 
 /** Extension pages to the background worker. */
 export type Message =
   | { type: "testConnection"; settings: Settings }
-  | { type: "suggest"; goal: string; page: PageSnapshot; previousSteps: string[] };
+  | { type: "suggest"; goal: string; page: PageSnapshot; history: HistoryEdge[] };
 
 /**
  * Side panel to the content script. A scan also draws or clears the debug badges, so they
@@ -25,7 +26,7 @@ export type ContentMessage =
  * Content script to the side panel: the person clicked one of the scanned elements. Only real
  * clicks (event.isTrusted) are reported, so a page script calling element.click() can't fake a step.
  */
-export type PageEvent = { type: "clicked"; id: string; label: string };
+export type PageEvent = { type: "clicked"; element: ElementRef };
 
 export interface ScanReply {
   page: PageSnapshot;
@@ -60,5 +61,12 @@ export interface Usage {
 }
 
 export type SuggestReply =
-  | { ok: true; model: string; suggestion: Suggestion; usage: Usage }
+  | {
+      ok: true;
+      model: string;
+      suggestion: Suggestion;
+      usage: Usage;
+      /** Labels of elements held back because they were already tried without progress. */
+      skipped: string[];
+    }
   | { ok: false; error: string };

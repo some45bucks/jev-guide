@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Candidate, PageSnapshot } from "../src/content/candidates";
+import { type HistoryEdge, pageRef } from "../src/shared/history";
 import type { JevResponse } from "../src/shared/jev";
 import {
   buildRankRequests,
@@ -42,13 +43,26 @@ describe("elementLine", () => {
 });
 
 describe("buildSuggestRequest", () => {
-  const request = buildSuggestRequest("jev-latest", "Cancel my subscription", billing, ["Account", "Billing"]);
+  const home = { path: "/index.html", title: "Streamly – Home", headings: ["Welcome back"] };
+  const account = { path: "/account.html", title: "Streamly – Account", headings: ["Account"] };
+  const history: HistoryEdge[] = [
+    { from: home, element: { role: "link", label: "Account", href: "/account.html" }, to: account },
+    { from: account, element: { role: "tab", label: "Billing", href: "/billing.html" }, to: pageRef(billing) },
+  ];
+  const request = buildSuggestRequest("jev-latest", "Cancel my subscription", billing, history);
+
+  it("points the choice at the history", () => {
+    expect(request.questions.next_click?.instructions).toContain("`history`");
+  });
 
   it("puts all page text in state, keyed by element id", () => {
     expect(request.state).toEqual({
       goal: "Cancel my subscription",
       page: { title: "Streamly – Billing", path: "/billing.html", headings: ["Account", "Your plan"] },
-      previous_steps: ["Account", "Billing"],
+      history: [
+        "on /index.html: clicked link: Account → /account.html ⇒ reached /account.html (Streamly – Account)",
+        "on /account.html: clicked tab: Billing → /billing.html ⇒ reached /billing.html (Streamly – Billing)",
+      ],
       elements: {
         e1: "link: Streamly home → /index.html",
         e2: "button: Change plan",

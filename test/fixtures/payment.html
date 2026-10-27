@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Streamly – Payment method</title>
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <header>
+      <a class="logo" href="index.html" aria-label="Streamly home">▶ Streamly</a>
+      <span class="spacer"></span>
+      <span style="color: #fff">Secure payment</span>
+    </header>
+    <main>
+      <h1>Payment method</h1>
+      <p>Current card: Visa ending in 4242</p>
+      <!-- Opened in a new tab from the billing page. Saving does nothing: this is a test page. -->
+      <form class="card" id="card-form">
+        <label>Card number <input name="card" autocomplete="off" /></label>
+        <div class="buttons">
+          <input type="submit" class="primary" value="Save card" />
+        </div>
+        <p id="result" role="status"></p>
+      </form>
+    </main>
+    <script>
+      document.getElementById("card-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        document.getElementById("result").textContent = "Test page: no card was saved.";
+      });
+    </script>
+  </body>
+</html>

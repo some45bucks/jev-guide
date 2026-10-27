@@ -2,6 +2,7 @@
 // Keeping network access here means the API key is read in one place, and content
 // scripts, which run inside untrusted pages, never handle it.
 
+import { pageRef, withoutTried } from "./shared/history";
 import { buildTestRequest, callJev, JevError, type JevRequest, type JevResult } from "./shared/jev";
 import { isFromExtensionPage, type Message, type SuggestReply, type TestConnectionReply } from "./shared/messages";
 import { loadSettings, originPattern } from "./shared/settings";
@@ -71,7 +72,7 @@ function errorMessage(err: unknown): string {
  * more candidates than a Choice can hold are ranked first with batches of Score questions,
  * sent in parallel, and the top of that ranking goes into the usual Choice.
  */
-async function suggest({ goal, page, previousSteps }: Extract<Message, { type: "suggest" }>): Promise<SuggestReply> {
+async function suggest({ goal, page, history }: Extract<Message, { type: "suggest" }>): Promise<SuggestReply> {
   // The key is read here, not passed in, so it never travels through other parts of the extension.
   const settings = await loadSettings();
   if (!settings.apiKey) return { ok: false, error: "Add your Jev API key in Settings first." };
@@ -88,16 +89,19 @@ async function suggest({ goal, page, previousSteps }: Extract<Message, { type: "
   }
 
   try {
-    let options = page.candidates;
+    // Clicks that already led nowhere aren't offered again; see shared/history.ts for why
+    // this is done in code rather than left to Jev.
+    const { usable, skipped } = withoutTried(page.candidates, history, pageRef(page));
+    let options = usable;
     if (options.length > MAX_DIRECT_CANDIDATES) {
-      const ranked = await Promise.all(buildRankRequests(settings.model, goal, page, previousSteps).map(ask));
-      options = shortlist(page.candidates, ranked);
+      const ranked = await Promise.all(buildRankRequests(settings.model, goal, page, history, usable).map(ask));
+      options = shortlist(usable, ranked);
     }
-    const result = await ask(buildSuggestRequest(settings.model, goal, page, previousSteps, options));
+    const result = await ask(buildSuggestRequest(settings.model, goal, page, history, options));
     const suggestion = parseSuggestion(result, options, settings.threshold);
     const ids = highlightedIds(suggestion);
     if (ids.length > 0) {
-      const risk = await ask(buildRiskRequest(settings.model, goal, page, previousSteps, options, ids));
+      const risk = await ask(buildRiskRequest(settings.model, goal, page, history, options, ids));
       suggestion.irreversible = parseRisk(risk, ids);
     }
     return {
@@ -105,6 +109,7 @@ async function suggest({ goal, page, previousSteps }: Extract<Message, { type: "
       model: result.model,
       suggestion,
       usage: { calls, inputTokens, latencyMs: Math.round(performance.now() - started) },
+      skipped: skipped.map((c) => c.label || "(no label)"),
     };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

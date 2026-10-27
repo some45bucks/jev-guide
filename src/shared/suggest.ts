@@ -7,7 +7,10 @@
 // putting labels in the option descriptions (16/17 top-1 against 15/17) at a similar cost.
 
 import type { Candidate, PageSnapshot } from "../content/candidates";
+import { edgeText, elementLine, type HistoryEdge, MAX_HISTORY_IN_STATE } from "./history";
 import { JevError, type JevRequest, type JevResponse } from "./jev";
+
+export { elementLine };
 
 export const NONE_HERE = "none_here";
 /** Choice accepts at most 255 options, and none_here takes one of them. */
@@ -34,16 +37,12 @@ export const IRREVERSIBLE_THRESHOLD = 0.5;
  */
 export const GOAL_DONE_THRESHOLD = 0.8;
 
-/** One compact line per element: "link: Billing → /billing.html". */
-export function elementLine(c: Candidate): string {
-  return `${c.role}: ${c.label || "(no label)"}${c.href ? ` → ${c.href}` : ""}`;
-}
-
-function baseState(goal: string, page: PageSnapshot, previousSteps: string[], candidates: Candidate[]) {
+function baseState(goal: string, page: PageSnapshot, history: HistoryEdge[], candidates: Candidate[]) {
   return {
     goal,
     page: { title: page.title, path: page.path, headings: page.headings },
-    previous_steps: previousSteps,
+    // The recent moves and where they led, oldest first: "on /: clicked link: Account → /account ⇒ reached /account (Account)".
+    history: history.slice(-MAX_HISTORY_IN_STATE).map(edgeText),
     elements: Object.fromEntries(candidates.map((c) => [c.id, elementLine(c)])),
   };
 }
@@ -57,7 +56,7 @@ export function buildSuggestRequest(
   model: string,
   goal: string,
   page: PageSnapshot,
-  previousSteps: string[],
+  history: HistoryEdge[],
   candidates: Candidate[] = page.candidates,
 ): JevRequest {
   if (candidates.length > MAX_DIRECT_CANDIDATES) {
@@ -68,11 +67,13 @@ export function buildSuggestRequest(
   criteria[NONE_HERE] = "None of the elements moves toward the goal";
   return {
     model,
-    state: baseState(goal, page, previousSteps, candidates),
+    state: baseState(goal, page, history, candidates),
     questions: {
       next_click: {
         type: "choice",
-        instructions: "Which element in `elements` should the person click next to move toward `goal`?",
+        // Pointing at `history` helped in tests: with two dead ends behind it, Jev found the
+        // remaining option only with this wording (dead ends are also removed in code).
+        instructions: "Given what `history` shows was already tried, which element in `elements` should the person click next to move toward `goal`?",
         criteria,
       },
       goal_reached: { type: "noul", instructions: "Does this page show that `goal` has been completed?" },
@@ -92,13 +93,19 @@ const RANK_LEVELS = [
  * in batches. Each batch's state holds only its own elements, so no request repeats the
  * whole page.
  */
-export function buildRankRequests(model: string, goal: string, page: PageSnapshot, previousSteps: string[]): JevRequest[] {
+export function buildRankRequests(
+  model: string,
+  goal: string,
+  page: PageSnapshot,
+  history: HistoryEdge[],
+  candidates: Candidate[] = page.candidates,
+): JevRequest[] {
   const requests: JevRequest[] = [];
-  for (let i = 0; i < page.candidates.length; i += RANK_BATCH_SIZE) {
-    const batch = page.candidates.slice(i, i + RANK_BATCH_SIZE);
+  for (let i = 0; i < candidates.length; i += RANK_BATCH_SIZE) {
+    const batch = candidates.slice(i, i + RANK_BATCH_SIZE);
     requests.push({
       model,
-      state: baseState(goal, page, previousSteps, batch),
+      state: baseState(goal, page, history, batch),
       questions: Object.fromEntries(
         batch.map((c) => [
           c.id,
@@ -202,13 +209,13 @@ export function buildRiskRequest(
   model: string,
   goal: string,
   page: PageSnapshot,
-  previousSteps: string[],
+  history: HistoryEdge[],
   candidates: Candidate[],
   ids: string[],
 ): JevRequest {
   return {
     model,
-    state: baseState(goal, page, previousSteps, candidates),
+    state: baseState(goal, page, history, candidates),
     questions: Object.fromEntries(
       ids.map((id) => [
         `irreversible_${id}`,

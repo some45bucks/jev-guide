@@ -5,7 +5,7 @@
 // It only takes orders from chrome.runtime messages, which web pages can't send, so text on
 // the page is only ever data: nothing a page says can make this script act.
 
-import { snapshotPage } from "./content/candidates";
+import { type Candidate, snapshotPage } from "./content/candidates";
 import { clearLayer, showLayer } from "./content/overlay";
 import { waitForQuiet } from "./content/settle";
 import type { ContentMessage, HighlightReply, PageEvent, ScanReply } from "./shared/messages";
@@ -22,7 +22,7 @@ if (!globalThis.__jevGuideLoaded) {
 
   // Elements and labels from the latest scan, by candidate id, so highlights and recorded
   // clicks refer to exactly what Jev saw.
-  let byId = new Map<string, { element: Element; label: string }>();
+  let byId = new Map<string, { element: Element; candidate: Candidate }>();
 
   chrome.runtime.onMessage.addListener((message: ContentMessage, sender, sendResponse) => {
     if (sender.id !== chrome.runtime.id) return false;
@@ -31,7 +31,7 @@ if (!globalThis.__jevGuideLoaded) {
       const started = performance.now();
       const { page, elements } = snapshotPage(document);
       const ms = Math.round(performance.now() - started);
-      byId = new Map(page.candidates.map((c, i) => [c.id, { element: elements[i]!, label: c.label }]));
+      byId = new Map(page.candidates.map((c, i) => [c.id, { element: elements[i]!, candidate: c }]));
       // A new scan means any earlier suggestion may no longer match the page.
       clearLayer("suggestion");
       if (message.badges) {
@@ -71,11 +71,12 @@ if (!globalThis.__jevGuideLoaded) {
     (event) => {
       // Synthetic clicks from page scripts (element.click()) have isTrusted false.
       if (!event.isTrusted || !(event.target instanceof Node)) return;
-      for (const [id, { element, label }] of byId) {
+      for (const { element, candidate } of byId.values()) {
         if (element.contains(event.target)) {
           // The highlight described the page before the click; it's stale now.
           clearLayer("suggestion");
-          const report: PageEvent = { type: "clicked", id, label };
+          const { role, label, href } = candidate;
+          const report: PageEvent = { type: "clicked", element: { role, label, href } };
           // No receiver (the panel was closed) is fine; the click simply isn't recorded.
           chrome.runtime.sendMessage(report).catch(() => {});
           return;

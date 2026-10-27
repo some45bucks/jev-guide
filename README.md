@@ -67,11 +67,12 @@ One Jev call per page, made by the background worker (`src/shared/suggest.ts`):
   "state": {
     "goal": "Cancel my subscription",
     "page": { "title": "Streamly – Billing", "path": "/billing.html", "headings": ["Account", "Your plan"] },
-    "previous_steps": ["Account", "Billing"],
+    "history": ["on /index.html: clicked link: Account → /account.html ⇒ reached /account.html (Streamly – Account)",
+                "on /account.html: clicked tab: Billing → /billing.html ⇒ reached /billing.html (Streamly – Billing)"],
     "elements": { "e8": "button: Change plan", "e11": "link: Cancel subscription → /cancel.html" }
   },
   "questions": {
-    "next_click":   { "type": "choice", "instructions": "Which element in `elements` should the person click next to move toward `goal`?",
+    "next_click":   { "type": "choice", "instructions": "Given what `history` shows was already tried, which element in `elements` should the person click next to move toward `goal`?",
                       "criteria": { "e8": null, "e11": null, "none_here": "None of the elements moves toward the goal" } },
     "goal_reached": { "type": "noul", "instructions": "Does this page show that `goal` has been completed?" },
     "needs_login":  { "type": "noul", "instructions": "Does this page ask the person to sign in before they can continue?" }
@@ -112,8 +113,12 @@ One Jev call per page, made by the background worker (`src/shared/suggest.ts`):
 4. **Record the click.** The content script listens for clicks in the capture phase without
    calling `preventDefault`, so the page always gets the click. It reports only clicks on scanned
    elements with `event.isTrusted`, so a page script calling `element.click()` can't fake a step.
-   The labels of clicked elements become `previous_steps`.
+   Each click becomes an edge in the history graph (below).
 5. **Stop** when `goal_reached` is 0.8 or more, when the person clicks Stop, or when the tab closes.
+
+**Refresh suggestion** runs the current step again on demand, for changes the loop can't see (content
+that loads on scroll, or a page still changing after the 4 s settle limit). It isn't a click, so it
+adds nothing to the history.
 
 Every event that makes work in flight stale (a click, a page starting to load) bumps a generation
 counter, and a step drops its result if a newer generation exists. That keeps a slow answer for
@@ -124,8 +129,33 @@ step" scored the real Cancel button 0.87 and Delete account 0.89, harmless contr
 and the link that only opens the confirmation page 0.53 (a warning one step early, the safe side).
 "Will it change something without confirming first?" missed both real final steps.
 
-Not covered yet: links that open a new tab (the session stays on the original tab), and closing the
-side panel, which ends the session because the panel holds it.
+**New tabs.** If the guided tab opens a tab within 5 seconds of a recorded click (a link with
+`target="_blank"`), the session follows it: at once if it opened in front, or when the person
+switches to it. Pop-ups that appear without a click are ignored. Closing a followed tab returns
+the session to the tab it came from.
+
+### History graph
+
+`src/shared/history.ts` keeps the path as a graph: pages are nodes, identified by path, title and
+headings (so a single-page app's "Step 2 of 3" and "Step 3 of 3" are different nodes), and every
+move is an edge, either a click or a navigation without one (Back, a typed URL, closing a tab).
+The last 12 edges go into `state.history` as text.
+
+Jev given only the history doesn't reliably avoid repeating itself. Tried on six loop scenarios
+(two runs each), the best wording got 11 of 12, but with two dead ends behind it, it found the
+remaining option at confidence 0.26 to 0.38, and other wordings walked back into a dead end. So
+the code holds back two kinds of element before asking Jev, and the panel lists what it held back:
+
+- **Dead ends:** clicked from this page, led somewhere else, and the person came back here.
+- **Loops:** clicked from this page twice without the page changing.
+
+One click that leaves the page unchanged is allowed again, because retrying can be right, and an
+error message changes the headings, which makes it a different page anyway. A wizard's Next
+button leads to a new page each time, so it's never held back. If every element would be held
+back, none is.
+
+Not covered yet: closing the side panel ends the session, because the panel holds it (a longer
+flow would keep it in `chrome.storage.session`).
 
 ## Which elements count as clickable
 
@@ -170,6 +200,7 @@ src/content/candidates.ts  finds and labels clickable elements, reads title and 
 src/content/overlay.ts     badges and the "Click here" highlight, in shadow roots
 src/content/settle.ts      waits for the DOM to go quiet after a click
 src/shared/suggest.ts      builds the Jev questions and parses the answer (pure, unit-tested)
+src/shared/history.ts      the history graph and the dead-end and loop rules (pure, unit-tested)
 src/options.ts       settings page and connection test
 src/sidepanel.ts     side panel: the guided loop, suggestion display, debug table
 src/shared/jev.ts    API types, response parser and fetch wrapper (pure, unit-tested)

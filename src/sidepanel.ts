@@ -1,9 +1,11 @@
 // Side panel. Stage 4: a guided loop. Start suggests the next click; when the person clicks
 // an element, the panel records it, waits for the page to settle (a navigation, or the DOM
 // going quiet), and suggests again, until Jev says the goal is reached or the person stops.
-// The panel only ever suggests: the person does every click.
+// It follows the flow into a new tab the guided tab opens, and keeps a history graph so
+// clicks that led nowhere aren't suggested again. The person does every click.
 
 import type { Candidate, PageSnapshot } from "./content/candidates";
+import { type ElementRef, type HistoryEdge, pageRef, type PageRef, recordArrival } from "./shared/history";
 import type { ContentMessage, HighlightReply, Message, PageEvent, ScanReply, SuggestReply } from "./shared/messages";
 import { loadSettings, pagePattern, TYPESAFE_BASE_URL } from "./shared/settings";
 import {
@@ -21,6 +23,7 @@ const goalInput = document.querySelector<HTMLTextAreaElement>("#goal")!;
 const pageLine = document.querySelector<HTMLParagraphElement>("#page")!;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const stopButton = document.querySelector<HTMLButtonElement>("#stop")!;
+const refreshButton = document.querySelector<HTMLButtonElement>("#refresh")!;
 const allowButton = document.querySelector<HTMLButtonElement>("#allow")!;
 const statusLine = document.querySelector<HTMLParagraphElement>("#status")!;
 const result = document.querySelector<HTMLDivElement>("#result")!;
@@ -37,12 +40,27 @@ const tbody = document.querySelector<HTMLTableSectionElement>("#candidates")!;
 // on click, because chrome.permissions.request must be the first await after the click.
 let activeTab: chrome.tabs.Tab | undefined;
 
+/** A tab the guided tab opens within this long after a click is where the flow continues. */
+const NEW_TAB_WINDOW_MS = 5000;
+
 interface Session {
   goal: string;
-  /** The guided tab. Fixed at Start, so switching tabs to look something up doesn't derail it. */
+  /**
+   * The guided tab. Set at Start and changed only by following a tab it opened, so switching
+   * tabs to look something up doesn't derail the session.
+   */
   tabId: number;
-  /** Labels of the elements the person clicked, sent to Jev as previous_steps. */
-  steps: string[];
+  /** Tabs the session came from, newest last, to go back to if a followed tab is closed. */
+  openerTabs: number[];
+  /** Tabs opened in the background after a click; followed once the person switches to one. */
+  childTabs: Set<number>;
+  /** Every move so far, as edges between pages. Sent to Jev and used to hold back dead ends. */
+  history: HistoryEdge[];
+  /** The page the last step read; the next arrival is recorded from it. */
+  lastPage: PageRef | null;
+  /** The click that hasn't reached its next page yet. */
+  pendingClick: ElementRef | null;
+  lastClickAt: number;
   /**
    * Bumped by every event that makes in-flight work stale (a click, a page load). Each step
    * remembers the generation it started in and drops its result if a newer one exists.
@@ -108,13 +126,17 @@ async function refreshActiveTab(): Promise<void> {
 function setRunning(running: boolean): void {
   startButton.hidden = running;
   stopButton.hidden = !running;
+  refreshButton.hidden = !running;
   goalInput.disabled = running;
   allowButton.hidden = true;
 }
 
-function renderSteps(steps: string[]): void {
-  stepsList.replaceChildren(...steps.map((label) => el("li", label)));
-  stepsWrap.hidden = steps.length === 0;
+/** The clicks so far, including one still waiting for its page to load. */
+function renderSteps(s: Session): void {
+  const clicks = s.history.flatMap((edge) => (edge.element ? [edge.element] : []));
+  if (s.pendingClick) clicks.push(s.pendingClick);
+  stepsList.replaceChildren(...clicks.map((e) => el("li", e.label || "(no label)")));
+  stepsWrap.hidden = clicks.length === 0;
 }
 
 /**
@@ -235,9 +257,32 @@ function renderSuggestion(s: Suggestion, page: PageSnapshot): ContentMessage & {
 }
 
 function startSession(goal: string, tabId: number): void {
-  session = { goal, tabId, steps: [], generation: 0 };
+  session = {
+    goal,
+    tabId,
+    openerTabs: [],
+    childTabs: new Set(),
+    history: [],
+    lastPage: null,
+    pendingClick: null,
+    lastClickAt: 0,
+    generation: 0,
+  };
   setRunning(true);
-  renderSteps([]);
+  renderSteps(session);
+  requestStep();
+}
+
+/** Moves the session to another tab: one the guided tab opened, or (opened = false) one it came from. */
+function followTab(tabId: number, opened = true): void {
+  const s = session;
+  if (!s || s.tabId === tabId) return;
+  sendToPage(s.tabId, { type: "clearHighlight" }).catch(() => {});
+  if (opened) s.openerTabs.push(s.tabId);
+  s.childTabs.delete(tabId);
+  s.tabId = tabId;
+  clearSuggestion();
+  showStatus(statusLine, opened ? "Following the new tab…" : "Back on the previous tab…", "info");
   requestStep();
 }
 
@@ -262,7 +307,9 @@ async function runStep(s: Session, generation: number): Promise<void> {
   allowButton.hidden = true;
   try {
     const tab = await chrome.tabs.get(s.tabId);
-    pageLine.textContent = `Guiding on ${describeUrl(tab.url)}`;
+    pageLine.textContent = `Guiding on ${describeUrl(tab.url || tab.pendingUrl)}`;
+    // Its "complete" event starts the next step.
+    if (tab.status === "loading") return showStatus(statusLine, "Waiting for the page to load…", "info");
     const pattern = pagePattern(tab.url);
     if (!pattern) {
       return showStatus(statusLine, "Jev Guide can't read this page. Go back, or Stop.", "error");
@@ -285,17 +332,33 @@ async function runStep(s: Session, generation: number): Promise<void> {
     showStatus(statusLine, "Reading the page and asking Jev…", "info");
     const page = await scanPage(s.tabId);
     if (stale()) return;
+    const here = pageRef(page);
+    const history = recordArrival(s.history, s.lastPage, s.pendingClick, here);
+    // Committed only once the step is known to be current: a step that went stale may have
+    // read the old page just before a slow navigation replaced it.
+    const commit = () => {
+      s.history = history;
+      s.lastPage = here;
+      s.pendingClick = null;
+      renderSteps(s);
+    };
     if (page.candidates.length === 0) {
-      return showStatus(statusLine, "No clickable elements found on this page.", "error");
+      // Still a page in the history, so coming back from it counts as a dead end.
+      commit();
+      return showStatus(statusLine, "No clickable elements found on this page. Go back, or Stop.", "error");
     }
 
-    const message: Message = { type: "suggest", goal: s.goal, page, previousSteps: s.steps };
+    const message: Message = { type: "suggest", goal: s.goal, page, history };
     const reply: SuggestReply | undefined = await chrome.runtime.sendMessage(message);
     if (stale()) return;
+    commit();
     if (!reply) return showStatus(statusLine, "The background worker didn't respond. Reload the extension.", "error");
     if (!reply.ok) return showStatus(statusLine, reply.error, "error");
 
     const highlight = renderSuggestion(reply.suggestion, page);
+    if (reply.skipped.length > 0) {
+      result.append(el("p", `Not suggesting again (tried before without getting closer): ${reply.skipped.join(", ")}.`, "muted small"));
+    }
     const { calls, inputTokens, latencyMs } = reply.usage;
     usageLine.textContent = `${reply.model} · ${calls} ${calls === 1 ? "call" : "calls"} · ${inputTokens} input tokens · ${latencyMs} ms`;
 
@@ -327,6 +390,12 @@ startButton.addEventListener("click", async () => {
   startSession(goal, tabId);
 });
 stopButton.addEventListener("click", () => stopSession("Stopped.", "info"));
+// For changes the loop can't see, such as content that loads on scroll or a page that kept
+// changing past the settle limit. Not a click, so it adds nothing to the history.
+refreshButton.addEventListener("click", () => {
+  clearSuggestion();
+  requestStep();
+});
 allowButton.addEventListener("click", async () => {
   const pattern = allowButton.dataset.pattern;
   if (!pattern) return;
@@ -348,8 +417,9 @@ badgesToggle.addEventListener("change", () => scan());
 chrome.runtime.onMessage.addListener((message: PageEvent, sender) => {
   if (!session || sender.id !== chrome.runtime.id || sender.tab?.id !== session.tabId || sender.frameId !== 0) return false;
   if (message.type === "clicked") {
-    session.steps.push(message.label || "(no label)");
-    renderSteps(session.steps);
+    session.pendingClick = message.element;
+    session.lastClickAt = Date.now();
+    renderSteps(session);
     clearSuggestion();
     showStatus(statusLine, "Got your click. Waiting for the page to settle…", "info");
     // If the click navigates, the load events below take over from this step.
@@ -362,7 +432,19 @@ chrome.runtime.onMessage.addListener((message: PageEvent, sender) => {
 chrome.storage.onChanged.addListener((_changes, area) => {
   if (area === "local") renderSetup();
 });
-chrome.tabs.onActivated.addListener(() => refreshActiveTab());
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  if (session?.childTabs.has(tabId)) followTab(tabId);
+  refreshActiveTab();
+});
+// A link with target="_blank" (or a script reacting to the click) opens the next page in a
+// new tab. Only tabs opened by the guided tab shortly after a click count, so pop-ups that
+// appear on their own don't take over the session.
+chrome.tabs.onCreated.addListener((tab) => {
+  if (!session || tab.id === undefined || tab.openerTabId !== session.tabId) return;
+  if (Date.now() - session.lastClickAt > NEW_TAB_WINDOW_MS) return;
+  if (tab.active) followTab(tab.id);
+  else session.childTabs.add(tab.id);
+});
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (session && tabId === session.tabId) {
     if (change.status === "loading") {
@@ -379,8 +461,16 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   // url covers single-page-app route changes; status "loading" covers reloads of the same URL.
   if (tabId === activeTab?.id && (change.url || change.status === "loading")) refreshActiveTab();
 });
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (session && tabId === session.tabId) stopSession("The guided tab was closed.", "info");
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  if (!session || tabId !== session.tabId) return;
+  // Back to the tab this one was opened from, if it's still open.
+  const s = session;
+  for (let back = s.openerTabs.pop(); back !== undefined; back = s.openerTabs.pop()) {
+    const exists = await chrome.tabs.get(back).then(() => true, () => false);
+    if (session !== s) return;
+    if (exists) return followTab(back, false);
+  }
+  stopSession("The guided tab was closed.", "info");
 });
 
 renderSetup();
