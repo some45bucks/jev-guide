@@ -30,6 +30,11 @@
           Model
           <input id="model" type="text" spellcheck="false" placeholder="jev-latest" />
         </label>
+        <label>
+          Confidence threshold
+          <input id="threshold" type="number" min="0" max="1" step="0.05" required />
+          <span class="hint">Below this, the side panel shows the top 3 options instead of a single "Click here".</span>
+        </label>
         <div class="buttons">
           <button type="submit" class="primary">Save</button>
           <button type="button" id="test">Test connection</button>

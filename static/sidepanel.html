@@ -12,14 +12,26 @@
       <p id="setup" role="status" aria-live="polite"></p>
 
       <section class="card">
-        <h2>This page</h2>
+        <label>
+          What do you want to do on this site?
+          <textarea id="goal" rows="2" placeholder="Cancel my subscription"></textarea>
+        </label>
         <p id="page" class="muted"></p>
         <div class="buttons">
-          <button type="button" id="scan" class="primary">Find clickable elements</button>
+          <button type="button" id="suggest" class="primary">Suggest next step</button>
+        </div>
+        <div id="result" aria-live="polite"></div>
+        <p id="usage" class="muted small"></p>
+      </section>
+
+      <details class="card">
+        <summary>Debug: clickable elements</summary>
+        <div class="buttons">
+          <button type="button" id="scan">Find clickable elements</button>
         </div>
         <label class="check">
           <input type="checkbox" id="badges" />
-          Show numbered badges on the page (debug)
+          Show numbered badges on the page
         </label>
         <p id="scan-status" role="status" aria-live="polite"></p>
         <div class="table-wrap" id="table-wrap" hidden>
@@ -30,7 +42,7 @@
             <tbody id="candidates"></tbody>
           </table>
         </div>
-      </section>
+      </details>
 
       <div class="buttons">
         <button type="button" id="open-options">Settings</button>

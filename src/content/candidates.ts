@@ -24,6 +24,16 @@ export interface Candidate {
   rect: Rect;
 }
 
+/** What Jev sees of a page: a little context plus the candidate table. */
+export interface PageSnapshot {
+  title: string;
+  /** location.pathname only: the query string can carry tokens or personal data. */
+  path: string;
+  /** Visible h1–h3 headings, which say where on the site the person is. */
+  headings: string[];
+  candidates: Candidate[];
+}
+
 export interface Layout {
   rectOf(el: Element): Rect;
   styleOf(el: Element): Pick<CSSStyleDeclaration, "display" | "visibility" | "opacity" | "cursor">;
@@ -52,6 +62,8 @@ const SEMANTIC = [
 const GENERIC = "div, span, li, img";
 
 const MAX_LABEL = 80;
+/** Enough headings to place the page without sending its whole outline. */
+const MAX_HEADINGS = 8;
 
 function collapse(text: string | null | undefined): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
@@ -228,4 +240,27 @@ export function extractCandidates(doc: Document, layout: Layout = browserLayout)
     lastControl = el;
   }
   return { candidates, elements };
+}
+
+export function extractHeadings(doc: Document, layout: Layout = browserLayout): string[] {
+  const headings: string[] = [];
+  for (const el of doc.querySelectorAll("h1, h2, h3")) {
+    if (headings.length === MAX_HEADINGS) break;
+    if (isHidden(el, layout)) continue;
+    const text = truncate(visibleText(el));
+    if (text) headings.push(text);
+  }
+  return headings;
+}
+
+/** Everything one suggestion needs from the page, plus the elements for highlighting. */
+export function snapshotPage(doc: Document, layout: Layout = browserLayout): { page: PageSnapshot; elements: Element[] } {
+  const { candidates, elements } = extractCandidates(doc, layout);
+  const page: PageSnapshot = {
+    title: truncate(collapse(doc.title)),
+    path: new URL(doc.URL).pathname,
+    headings: extractHeadings(doc, layout),
+    candidates,
+  };
+  return { page, elements };
 }

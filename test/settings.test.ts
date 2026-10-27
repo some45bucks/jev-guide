@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeBaseUrl, originPattern, pagePattern } from "../src/shared/settings";
+import { normalizeBaseUrl, originPattern, pagePattern, parseThreshold } from "../src/shared/settings";
 
 describe("normalizeBaseUrl", () => {
   it("trims spaces and trailing slashes", () => {
@@ -41,5 +41,15 @@ describe("pagePattern", () => {
     expect(pagePattern("chrome://extensions/")).toBeNull();
     expect(pagePattern("file:///home/me/page.html")).toBeNull();
     expect(pagePattern(undefined)).toBeNull();
+  });
+});
+
+describe("parseThreshold", () => {
+  it("accepts numbers from 0 to 1", () => {
+    expect(parseThreshold(" 0.6 ")).toBe(0.6);
+    expect(parseThreshold("1")).toBe(1);
+  });
+  it("rejects anything else", () => {
+    for (const bad of ["", "abc", "-0.1", "1.5", "60"]) expect(() => parseThreshold(bad)).toThrow(/0 to 1/);
   });
 });

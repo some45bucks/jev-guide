@@ -2,9 +2,10 @@
 // Keeping network access here means the API key is read in one place, and content
 // scripts, which run inside untrusted pages, never handle it.
 
-import { buildTestRequest, callJev, JevError } from "./shared/jev";
-import { isFromExtensionPage, type Message, type TestConnectionReply } from "./shared/messages";
-import { originPattern } from "./shared/settings";
+import { buildTestRequest, callJev, JevError, type JevRequest, type JevResult } from "./shared/jev";
+import { isFromExtensionPage, type Message, type SuggestReply, type TestConnectionReply } from "./shared/messages";
+import { loadSettings, originPattern } from "./shared/settings";
+import { buildRankRequests, buildSuggestRequest, MAX_DIRECT_CANDIDATES, parseSuggestion, shortlist } from "./shared/suggest";
 
 // Clicking the toolbar icon opens the side panel. Called at startup, not only on install,
 // as the chrome.sidePanel docs recommend.
@@ -20,6 +21,10 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
   if (message.type === "testConnection") {
     testConnection(message).then(sendResponse);
     return true; // keeps sendResponse valid until the promise resolves
+  }
+  if (message.type === "suggest") {
+    suggest(message).then(sendResponse);
+    return true;
   }
   return false;
 });
@@ -43,6 +48,49 @@ async function testConnection({ settings }: Extract<Message, { type: "testConnec
     if (answer?.type !== "noul") return { ok: false, error: "The API answered, but without the expected noul answer." };
     return { ok: true, model: result.model, noul: answer.noul, latencyMs: result.latencyMs, inputTokens: result.inputTokens };
   } catch (err) {
-    return { ok: false, error: err instanceof JevError ? err.message : `Unexpected error: ${String(err)}` };
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof JevError ? err.message : `Unexpected error: ${String(err)}`;
+}
+
+/**
+ * One suggestion for one page. Usually a single Jev call. Pages with more candidates than a
+ * Choice can hold are ranked first with batches of Score questions, sent in parallel, and
+ * the top of that ranking goes into the usual Choice.
+ */
+async function suggest({ goal, page, previousSteps }: Extract<Message, { type: "suggest" }>): Promise<SuggestReply> {
+  // The key is read here, not passed in, so it never travels through other parts of the extension.
+  const settings = await loadSettings();
+  if (!settings.apiKey) return { ok: false, error: "Add your Jev API key in Settings first." };
+  const conn = { apiKey: settings.apiKey, baseUrl: settings.baseUrl };
+
+  const started = performance.now();
+  let calls = 0;
+  let inputTokens = 0;
+  async function ask(request: JevRequest): Promise<JevResult> {
+    const result = await callJev(conn, request);
+    calls += 1;
+    inputTokens += result.inputTokens ?? 0;
+    return result;
+  }
+
+  try {
+    let options = page.candidates;
+    if (options.length > MAX_DIRECT_CANDIDATES) {
+      const ranked = await Promise.all(buildRankRequests(settings.model, goal, page, previousSteps).map(ask));
+      options = shortlist(page.candidates, ranked);
+    }
+    const result = await ask(buildSuggestRequest(settings.model, goal, page, previousSteps, options));
+    return {
+      ok: true,
+      model: result.model,
+      suggestion: parseSuggestion(result, options, settings.threshold),
+      usage: { calls, inputTokens, latencyMs: Math.round(performance.now() - started) },
+    };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
   }
 }

@@ -5,6 +5,8 @@ export interface Settings {
   apiKey: string;
   baseUrl: string;
   model: string;
+  /** Below this confidence the side panel shows the top 3 options instead of one "Click here". */
+  threshold: number;
 }
 
 export const TYPESAFE_BASE_URL = "https://api.typesafe.ai";
@@ -13,7 +15,17 @@ export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
   baseUrl: TYPESAFE_BASE_URL,
   model: "jev-latest",
+  threshold: 0.6,
 };
+
+/** Reads a threshold typed by a person. Throws with a message for that person if it's out of range. */
+export function parseThreshold(input: string): number {
+  const value = Number(input.trim());
+  if (input.trim() === "" || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error("The confidence threshold must be a number from 0 to 1, such as 0.6.");
+  }
+  return value;
+}
 
 /**
  * Cleans up a base URL typed by a person. It throws an Error with a message for that

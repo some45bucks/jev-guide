@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { extractCandidates, hrefPath, labelOf, type Layout } from "../src/content/candidates";
+import { extractCandidates, hrefPath, labelOf, snapshotPage, type Layout } from "../src/content/candidates";
 
 const PAGE_URL = "http://127.0.0.1:8123/index.html";
 
@@ -211,5 +211,20 @@ describe("extractCandidates", () => {
     const { candidates } = scan(`<a href="/x">${"word ".repeat(40)}</a>`);
     expect(candidates[0]?.label).toHaveLength(80);
     expect(candidates[0]?.label.endsWith("…")).toBe(true);
+  });
+});
+
+describe("snapshotPage", () => {
+  it("adds the title, path without query, and visible headings", () => {
+    const dom = new JSDOM(
+      `<title>Streamly – Billing</title>
+       <h1>Account</h1><h2 style="display: none">Hidden heading</h2><h2>Your plan</h2><h4>Too deep</h4>
+       <a href="/cancel.html">Cancel subscription</a>`,
+      { url: "http://127.0.0.1:8123/billing.html?session=abc" },
+    );
+    const { page, elements } = snapshotPage(dom.window.document, fakeLayout(dom));
+    expect(page).toMatchObject({ title: "Streamly – Billing", path: "/billing.html", headings: ["Account", "Your plan"] });
+    expect(page.candidates).toHaveLength(1);
+    expect(elements).toHaveLength(1);
   });
 });

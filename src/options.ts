@@ -1,12 +1,13 @@
-// Options page: API key, base URL and model, plus a button that tests them.
+// Options page: API key, base URL, model and confidence threshold, plus a button that tests the connection.
 
 import type { Message, TestConnectionReply } from "./shared/messages";
-import { loadSettings, normalizeBaseUrl, originPattern, saveSettings, type Settings } from "./shared/settings";
+import { loadSettings, normalizeBaseUrl, originPattern, parseThreshold, saveSettings, type Settings } from "./shared/settings";
 
 const form = document.querySelector<HTMLFormElement>("#settings")!;
 const apiKeyInput = document.querySelector<HTMLInputElement>("#api-key")!;
 const baseUrlInput = document.querySelector<HTMLInputElement>("#base-url")!;
 const modelInput = document.querySelector<HTMLInputElement>("#model")!;
+const thresholdInput = document.querySelector<HTMLInputElement>("#threshold")!;
 const testButton = document.querySelector<HTMLButtonElement>("#test")!;
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
 
@@ -15,11 +16,16 @@ function showStatus(text: string, kind: "ok" | "error" | "info"): void {
   status.dataset.kind = kind;
 }
 
-/** Reads the form. Throws with a readable message if the base URL is unusable. */
+/** Reads the form. Throws with a readable message if the base URL or threshold is unusable. */
 function readForm(): Settings {
   const baseUrl = normalizeBaseUrl(baseUrlInput.value);
   baseUrlInput.value = baseUrl;
-  return { apiKey: apiKeyInput.value.trim(), baseUrl, model: modelInput.value.trim() || "jev-latest" };
+  return {
+    apiKey: apiKeyInput.value.trim(),
+    baseUrl,
+    model: modelInput.value.trim() || "jev-latest",
+    threshold: parseThreshold(thresholdInput.value),
+  };
 }
 
 /**
@@ -39,6 +45,7 @@ async function init(): Promise<void> {
   apiKeyInput.value = settings.apiKey;
   baseUrlInput.value = settings.baseUrl;
   modelInput.value = settings.model;
+  thresholdInput.value = String(settings.threshold);
 }
 
 form.addEventListener("submit", async (event) => {
