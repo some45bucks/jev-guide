@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Jev Guide",
+  "version": "0.1.0",
+  "description": "Highlights the next thing to click to reach your goal on a website. You do the clicking.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "tabs"],
+  "host_permissions": ["https://api.typesafe.ai/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Open Jev Guide"
+  }
+}

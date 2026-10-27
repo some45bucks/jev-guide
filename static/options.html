@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jev Guide settings</title>
+    <link rel="stylesheet" href="ui.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Jev Guide settings</h1>
+      <p class="muted">
+        Your key is stored only in this browser profile. This is a prototype: a production version would send
+        requests through a small backend, so no key ships inside the extension.
+      </p>
+      <form id="settings">
+        <label>
+          API key
+          <input id="api-key" type="password" autocomplete="off" spellcheck="false" required />
+        </label>
+        <label>
+          Base URL
+          <input id="base-url" type="url" spellcheck="false" required />
+          <span class="hint">
+            TypeSafe: <code>https://api.typesafe.ai</code> · OpenRouter: <code>https://openrouter.ai/api</code>.
+            Requests go to the base URL plus <code>/v1/systemone</code>.
+          </span>
+        </label>
+        <label>
+          Model
+          <input id="model" type="text" spellcheck="false" placeholder="jev-latest" />
+        </label>
+        <div class="buttons">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="test">Test connection</button>
+        </div>
+        <p id="status" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
