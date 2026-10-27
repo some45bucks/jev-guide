@@ -59,6 +59,8 @@ const STYLE = `
   .alt .tag { background: #9a6700; }
   .danger .tag { background: #cf222e; }
   .main.edge .tag, .alt.edge .tag, .danger.edge .tag { bottom: auto; top: calc(100% + 6px); }
+  /* Near the window's right edge the tag would be cut off, so it lines up with the right side instead. */
+  .main.flip .tag, .alt.flip .tag, .danger.flip .tag { left: auto; right: -3px; }
 `;
 
 // Room a tag needs outside its element before it moves to the other side.
@@ -107,18 +109,23 @@ export function showLayer(layer: Layer, marks: Mark[]): void {
     tag.textContent = text;
     box.append(tag);
     root.append(box);
-    return { box, element, tone };
+    return { box, tag, element, tone };
   });
 
   // Positions come from getBoundingClientRect, so they follow page scrolling, scrolling
   // inside panels (scroll events are captured from every element), and window resizes.
   function place(): void {
-    for (const { box, element, tone } of boxes) {
+    for (const { box, tag, element, tone } of boxes) {
       const r = element.getBoundingClientRect();
       box.style.transform = `translate(${r.x}px, ${r.y}px)`;
       box.style.width = `${r.width}px`;
       box.style.height = `${r.height}px`;
       box.classList.toggle("edge", (tone === "debug" ? r.x : r.y) < EDGE[tone]);
+      if (tone !== "debug") {
+        // Measured, since the tag's width depends on its text.
+        box.classList.remove("flip");
+        if (tag.getBoundingClientRect().right > innerWidth) box.classList.add("flip");
+      }
     }
   }
   let frame = 0;
@@ -136,6 +143,7 @@ export function showLayer(layer: Layer, marks: Mark[]): void {
     removeEventListener("resize", schedule);
   });
 
-  place();
+  // Attached before placing, so tags can be measured; no paint happens in between.
   document.documentElement.append(host);
+  place();
 }
