@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Streamly – Cancel subscription</title>
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <header>
+      <a class="logo" href="index.html" aria-label="Streamly home">▶ Streamly</a>
+      <a href="browse.html">Browse</a>
+      <a href="pricing.html">Pricing</a>
+      <span class="spacer"></span>
+      <a href="account.html">Account</a>
+    </header>
+    <main>
+      <h1>Cancel your subscription?</h1>
+      <p>You'll keep Premium until November 14. After that, your plan ends.</p>
+
+      <!-- The final step. The button does nothing: this is a test page. -->
+      <form class="card" id="cancel-form">
+        <label>Tell us why (optional) <input name="reason" value="Too expensive" /></label>
+        <div class="buttons">
+          <a class="primary" href="billing.html">Keep my subscription</a>
+          <input type="submit" class="danger" value="Cancel subscription" />
+        </div>
+        <p id="result" role="status"></p>
+      </form>
+    </main>
+    <script>
+      document.getElementById("cancel-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        document.getElementById("result").textContent = "Test page: nothing was cancelled.";
+      });
+    </script>
+  </body>
+</html>

@@ -1,9 +1,19 @@
 // Messages between extension pages and the background service worker. One union type
 // keeps both sides of chrome.runtime.sendMessage in agreement at compile time.
 
+import type { Candidate } from "../content/candidates";
 import type { Settings } from "./settings";
 
+/** Extension pages to the background worker. */
 export type Message = { type: "testConnection"; settings: Settings };
+
+/** Side panel to the content script. One message: rescanning is cheap, and it keeps badges in sync with the table. */
+export type ContentMessage = { type: "scan"; badges: boolean };
+
+export interface ScanReply {
+  candidates: Candidate[];
+  ms: number;
+}
 
 /**
  * True when a message comes from one of the extension's own pages (options, side panel).

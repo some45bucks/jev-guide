@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Streamly – Account</title>
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <header>
+      <a class="logo" href="index.html" aria-label="Streamly home">▶ Streamly</a>
+      <a href="browse.html">Browse</a>
+      <a href="pricing.html">Pricing</a>
+      <span class="spacer"></span>
+      <a href="account.html">Account</a>
+    </header>
+    <main>
+      <h1>Account</h1>
+      <nav class="tabs" role="tablist">
+        <a role="tab" aria-selected="true" href="account.html">Profile</a>
+        <a role="tab" aria-selected="false" href="billing.html">Billing</a>
+        <a role="tab" aria-selected="false" href="#security">Security</a>
+      </nav>
+
+      <form class="card" onsubmit="event.preventDefault(); alert('Saved (test page)')">
+        <h2>Profile</h2>
+        <label>Display name <input name="name" value="Alex Example" /></label>
+        <label>Email <input type="email" name="email" value="alex@example.com" /></label>
+        <button class="primary" type="submit">Save profile</button>
+      </form>
+
+      <form id="security" class="card" onsubmit="event.preventDefault(); alert('Password updated (test page)')">
+        <h2>Security</h2>
+        <label>Current password <input type="password" name="current" value="hunter2-secret" /></label>
+        <label>New password <input type="password" name="new" /></label>
+        <button type="submit">Update password</button>
+      </form>
+
+      <section class="card">
+        <h2>Danger zone</h2>
+        <p>Deleting your account removes your profile and watch history.</p>
+        <!-- Does nothing. Stage 4 should flag it as irreversible. -->
+        <button class="danger" type="button" onclick="alert('Nothing was deleted (test page)')">Delete account</button>
+      </section>
+    </main>
+    <footer>
+      <a href="help.html">Help</a>
+      <a href="account.html">Account</a>
+    </footer>
+  </body>
+</html>

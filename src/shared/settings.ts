@@ -36,9 +36,31 @@ export function normalizeBaseUrl(input: string): string {
   return url.origin + path;
 }
 
-/** The host-permission pattern Chrome needs before the extension can call this base URL. */
-export function originPattern(baseUrl: string): string {
-  return `${new URL(baseUrl).origin}/*`;
+/**
+ * The host-permission pattern Chrome needs before the extension can call or script this URL.
+ * Leaves out the port: a pattern without one matches every port, so http://localhost:8123
+ * falls under the manifest's optional "http://localhost/*".
+ */
+export function originPattern(url: string): string {
+  const { protocol, hostname } = new URL(url);
+  return `${protocol}//${hostname}/*`;
+}
+
+/**
+ * The pattern to request before scanning a page, or null for pages the extension can't
+ * script. Matches optional_host_permissions in the manifest: https sites and local servers.
+ */
+export function pagePattern(url: string | undefined): string | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  const local = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  if (parsed.protocol === "https:" || (parsed.protocol === "http:" && local)) return originPattern(url);
+  return null;
 }
 
 export async function loadSettings(): Promise<Settings> {

@@ -1,0 +1,22 @@
+/* Fake streaming-service site for trying Jev Guide. Nothing here talks to a server. */
+body { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #1d2433; background: #fafbfc; }
+header, footer { display: flex; gap: 18px; align-items: center; padding: 12px 24px; background: #1d2433; }
+header a, footer a { color: #fff; text-decoration: none; }
+footer { background: #eef0f4; font-size: 13px; }
+footer a { color: #4a5468; }
+main { max-width: 720px; margin: 0 auto; padding: 24px; display: grid; gap: 18px; }
+.logo { font-weight: 700; font-size: 18px; }
+.spacer { flex: 1; }
+.card { background: #fff; border: 1px solid #dde1e8; border-radius: 8px; padding: 16px 20px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid #dde1e8; }
+.tabs a { padding: 8px 14px; color: #4a5468; text-decoration: none; }
+.tabs a[aria-selected="true"] { color: #1d2433; border-bottom: 2px solid #3a5bd9; }
+button, input[type="submit"] { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #c4cad6; background: #fff; cursor: pointer; }
+.primary { background: #3a5bd9; border-color: #3a5bd9; color: #fff; }
+.danger { color: #b3261e; border-color: #b3261e; }
+.fine-print, .fine-print a { font-size: 12px; color: #8a93a5; }
+.notice { padding: 10px 14px; background: #fff7e0; border: 1px solid #f0d78a; border-radius: 6px; }
+label { display: grid; gap: 4px; max-width: 320px; }
+input { font: inherit; padding: 6px 8px; }
+.buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+a.primary { padding: 8px 14px; border-radius: 6px; text-decoration: none; }

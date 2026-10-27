@@ -9,8 +9,29 @@
   <body>
     <main>
       <h1>Jev Guide</h1>
-      <p class="muted">Type a goal, and Jev Guide highlights the next thing to click. You do the clicking.</p>
       <p id="setup" role="status" aria-live="polite"></p>
+
+      <section class="card">
+        <h2>This page</h2>
+        <p id="page" class="muted"></p>
+        <div class="buttons">
+          <button type="button" id="scan" class="primary">Find clickable elements</button>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="badges" />
+          Show numbered badges on the page (debug)
+        </label>
+        <p id="scan-status" role="status" aria-live="polite"></p>
+        <div class="table-wrap" id="table-wrap" hidden>
+          <table>
+            <thead>
+              <tr><th>#</th><th>Label</th><th>Role</th><th>Link</th></tr>
+            </thead>
+            <tbody id="candidates"></tbody>
+          </table>
+        </div>
+      </section>
+
       <div class="buttons">
         <button type="button" id="open-options">Settings</button>
       </div>
