@@ -18,10 +18,17 @@
         </label>
         <p id="page" class="muted"></p>
         <div class="buttons">
-          <button type="button" id="suggest" class="primary">Suggest next step</button>
+          <button type="button" id="start" class="primary">Start</button>
+          <button type="button" id="stop" hidden>Stop</button>
+          <button type="button" id="allow" hidden></button>
         </div>
+        <p id="status" role="status" aria-live="polite"></p>
         <div id="result" aria-live="polite"></div>
         <p id="usage" class="muted small"></p>
+        <div id="steps-wrap" hidden>
+          <h2>Steps so far</h2>
+          <ol id="steps" class="options"></ol>
+        </div>
       </section>
 
       <details class="card">

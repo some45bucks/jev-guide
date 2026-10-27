@@ -26,6 +26,13 @@ export const FLAG_THRESHOLD = 0.5;
  * The parsed suggestion still keeps the raw top 3 for the benchmark log.
  */
 export const MIN_SHOWN_PROBABILITY = 0.05;
+/** From this probability a highlighted element is shown in red as a final, irreversible step. */
+export const IRREVERSIBLE_THRESHOLD = 0.5;
+/**
+ * The guided loop stops once goal_reached is this high. Stricter than FLAG_THRESHOLD because
+ * stopping too early leaves the person without guidance, while one extra suggestion costs little.
+ */
+export const GOAL_DONE_THRESHOLD = 0.8;
 
 /** One compact line per element: "link: Billing → /billing.html". */
 export function elementLine(c: Candidate): string {
@@ -139,6 +146,11 @@ export interface Suggestion {
   goalReached: number;
   /** Probability that the page asks the person to sign in. */
   needsLogin: number;
+  /**
+   * For each element the panel will highlight: probability that clicking it is the final step
+   * of something that can't be undone. Filled in by a second request (see buildRiskRequest).
+   */
+  irreversible: Record<string, number>;
 }
 
 export function parseSuggestion(response: JevResponse, candidates: Candidate[], threshold: number): Suggestion {
@@ -166,5 +178,55 @@ export function parseSuggestion(response: JevResponse, candidates: Candidate[], 
     alternatives,
     goalReached: reached.noul,
     needsLogin: login.noul,
+    irreversible: {},
   };
+}
+
+/** The elements the panel highlights: the choice when confident, otherwise the likely alternatives. */
+export function highlightedIds(s: Suggestion): string[] {
+  if (s.confident) return s.choice === NONE_HERE ? [] : [s.choice];
+  return s.alternatives.filter((a, i) => i === 0 || a.probability >= MIN_SHOWN_PROBABILITY).map((a) => a.id);
+}
+
+/**
+ * The irreversibility check. It depends on which element was chosen, so it can't share the
+ * first request; it's a second, small request with one noul per highlighted element. Asking
+ * about every element up front would avoid the wait but cost a question per element.
+ *
+ * The wording asks about the *final confirmation* step. Tried on the fixture pages, it scored
+ * the real Cancel button 0.87 and Delete account 0.89, harmless controls 0.08 or less, and the
+ * link that only opens the confirmation page 0.53 (a warning one step early, the safe side).
+ * Asking "will it change something without confirming first" missed both real final steps.
+ */
+export function buildRiskRequest(
+  model: string,
+  goal: string,
+  page: PageSnapshot,
+  previousSteps: string[],
+  candidates: Candidate[],
+  ids: string[],
+): JevRequest {
+  return {
+    model,
+    state: baseState(goal, page, previousSteps, candidates),
+    questions: Object.fromEntries(
+      ids.map((id) => [
+        `irreversible_${id}`,
+        {
+          type: "noul" as const,
+          instructions: `Is \`elements.${id}\` the final confirmation step of an action that can't be undone, such as cancelling, deleting, paying or sending?`,
+        },
+      ]),
+    ),
+  };
+}
+
+export function parseRisk(response: JevResponse, ids: string[]): Record<string, number> {
+  return Object.fromEntries(
+    ids.map((id) => {
+      const answer = response.answers[`irreversible_${id}`];
+      if (answer?.type !== "noul") throw new JevError(`The irreversibility answer for ${id} is missing.`);
+      return [id, answer.noul];
+    }),
+  );
 }

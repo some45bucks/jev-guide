@@ -3,10 +3,13 @@ import type { Candidate, PageSnapshot } from "../src/content/candidates";
 import type { JevResponse } from "../src/shared/jev";
 import {
   buildRankRequests,
+  buildRiskRequest,
   buildSuggestRequest,
   elementLine,
   MAX_DIRECT_CANDIDATES,
+  highlightedIds,
   NONE_HERE,
+  parseRisk,
   parseSuggestion,
   RANK_BATCH_SIZE,
   shortlist,
@@ -165,5 +168,50 @@ describe("parseSuggestion", () => {
     const partial = response("e1", 0.9, { e1: 0.9 });
     delete partial.answers.needs_login;
     expect(() => parseSuggestion(partial, billing.candidates, 0.6)).toThrow(/not all three/);
+  });
+});
+
+describe("highlightedIds", () => {
+  const base = { confidence: 0.9, goalReached: 0, needsLogin: 0, irreversible: {} };
+  const alternatives = [
+    { id: "e1", probability: 0.45 },
+    { id: "e2", probability: 0.3 },
+    { id: "e3", probability: 0.02 },
+  ];
+
+  it("is the choice when confident", () => {
+    expect(highlightedIds({ ...base, choice: "e2", confident: true, alternatives })).toEqual(["e2"]);
+  });
+  it("is nothing when confidently none_here", () => {
+    expect(highlightedIds({ ...base, choice: NONE_HERE, confident: true, alternatives })).toEqual([]);
+  });
+  it("is the likely alternatives when unsure, dropping near-zero ones", () => {
+    expect(highlightedIds({ ...base, choice: "e1", confident: false, alternatives })).toEqual(["e1", "e2"]);
+  });
+});
+
+describe("buildRiskRequest and parseRisk", () => {
+  const request = buildRiskRequest("jev-latest", "Cancel my subscription", billing, [], billing.candidates, ["e3", "e2"]);
+
+  it("asks one noul per highlighted element about the final, irreversible step", () => {
+    expect(Object.keys(request.questions)).toEqual(["irreversible_e3", "irreversible_e2"]);
+    const q = request.questions.irreversible_e3;
+    expect(q?.type).toBe("noul");
+    expect(q?.instructions).toContain("`elements.e3`");
+    expect(q?.instructions).toContain("final confirmation step");
+  });
+
+  it("keeps the same state as the suggestion, so the page context is there", () => {
+    expect((request.state as { elements: object }).elements).toHaveProperty("e3", "link: Cancel subscription → /cancel.html");
+  });
+
+  it("reads the probabilities back by element id", () => {
+    const response: JevResponse = {
+      model: "jev-1.14.0",
+      inputTokens: 600,
+      answers: { irreversible_e3: { type: "noul", noul: 0.87 }, irreversible_e2: { type: "noul", noul: 0.08 } },
+    };
+    expect(parseRisk(response, ["e3", "e2"])).toEqual({ e3: 0.87, e2: 0.08 });
+    expect(() => parseRisk(response, ["e1"])).toThrow(/missing/);
   });
 });

@@ -7,8 +7,8 @@ A Chrome extension that helps you reach a goal on a website, such as "cancel my 
 Decisions come from Jev, TypeSafe AI's System One model, which answers typed questions (choice,
 yes/no, score) about a state instead of generating text.
 
-> Status: stage 3 of 7. Type a goal, and Jev Guide highlights the next element to click on the
-> current page. Following you across pages comes in stage 4.
+> Status: stage 4 of 7. Type a goal and press Start: Jev Guide highlights the next element, follows
+> your clicks across pages, warns before irreversible final steps, and stops when the goal is done.
 
 ## Build and load
 
@@ -36,10 +36,12 @@ flow. Nothing on it does anything real: the final Cancel button only shows "noth
 npm run fixtures   # serves it at http://127.0.0.1:8123
 ```
 
-Open that URL, open the side panel, type a goal such as "Cancel my subscription", and click
-**Suggest next step**. Chrome asks once for access to the site. The **Debug** section lists every
-clickable element found, and **Show numbered badges** numbers them on the page. The home page
-includes a section of elements the extension should skip (hidden, zero-size, disabled).
+Open that URL, open the side panel, type a goal such as "Cancel my subscription", and press
+**Start**. Chrome asks once for access to the site. Click the highlighted elements yourself; the
+panel follows along. The final Cancel button is outlined in red as an irreversible step, and does
+nothing when clicked. The **Debug** section lists every clickable element found, and **Show
+numbered badges** numbers them on the page. The home page includes a section of elements the
+extension should skip (hidden, zero-size, disabled).
 
 After changing code, run `npm run build` again and click the reload icon on the extension's card in
 `chrome://extensions`. `npm run watch` rebuilds on every save. You still reload the extension yourself.
@@ -93,6 +95,38 @@ One Jev call per page, made by the background worker (`src/shared/suggest.ts`):
   Choice, back in DOM order. A synthetic 400-element page took 4 parallel ranking calls plus 1 Choice
   (0.4 to 2 seconds in total, about 38k input tokens) and found the right element for 3 of 3 goals.
 
+## The guided loop
+
+`src/sidepanel.ts` runs one step per page, and the person does every click:
+
+1. **Wait for the page to settle.** After a click, either the tab navigates (seen through
+   `chrome.tabs.onUpdated`; the step runs once the new page reports `complete`) or the page changes
+   in place, in which case the content script waits until the DOM has been quiet for 500 ms
+   (at most 4 s, for pages with clocks or carousels).
+2. **Read the page and ask Jev** (one call, as above).
+3. **Check the highlight for irreversibility.** Whether a click can be undone depends on which
+   element was chosen, so this is a second, small call: one noul per highlighted element, "Is
+   `elements.eN` the final confirmation step of an action that can't be undone, such as cancelling,
+   deleting, paying or sending?". At 0.5 or more the element is outlined in red with a "Final step"
+   tag and the panel shows a warning. It never blocks the click.
+4. **Record the click.** The content script listens for clicks in the capture phase without
+   calling `preventDefault`, so the page always gets the click. It reports only clicks on scanned
+   elements with `event.isTrusted`, so a page script calling `element.click()` can't fake a step.
+   The labels of clicked elements become `previous_steps`.
+5. **Stop** when `goal_reached` is 0.8 or more, when the person clicks Stop, or when the tab closes.
+
+Every event that makes work in flight stale (a click, a page starting to load) bumps a generation
+counter, and a step drops its result if a newer generation exists. That keeps a slow answer for
+the old page from highlighting something on the new one.
+
+The irreversibility wording was picked by trying three on the fixture pages: "final confirmation
+step" scored the real Cancel button 0.87 and Delete account 0.89, harmless controls 0.08 or less,
+and the link that only opens the confirmation page 0.53 (a warning one step early, the safe side).
+"Will it change something without confirming first?" missed both real final steps.
+
+Not covered yet: links that open a new tab (the session stays on the original tab), and closing the
+side panel, which ends the session because the panel holds it.
+
 ## Which elements count as clickable
 
 Found by `src/content/candidates.ts`, in DOM order:
@@ -131,12 +165,13 @@ forwards requests to Jev. The base URL setting already allows that: point it at 
 ```
 static/              manifest.json, HTML and CSS, copied into dist/ as-is
 src/background.ts    service worker: the only code that calls the Jev API
-src/content.ts       content script, injected on demand: reads the page and draws overlays
+src/content.ts       content script, injected on demand: reads the page, draws overlays, reports clicks
 src/content/candidates.ts  finds and labels clickable elements, reads title and headings (unit-tested in jsdom)
 src/content/overlay.ts     badges and the "Click here" highlight, in shadow roots
+src/content/settle.ts      waits for the DOM to go quiet after a click
 src/shared/suggest.ts      builds the Jev questions and parses the answer (pure, unit-tested)
 src/options.ts       settings page and connection test
-src/sidepanel.ts     side panel: goal, suggestion, debug table
+src/sidepanel.ts     side panel: the guided loop, suggestion display, debug table
 src/shared/jev.ts    API types, response parser and fetch wrapper (pure, unit-tested)
 src/shared/settings.ts  settings storage and base-URL validation
 src/shared/messages.ts  message types between pages and the background worker

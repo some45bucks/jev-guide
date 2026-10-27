@@ -7,8 +7,9 @@ export type Layer = "badges" | "suggestion";
 
 /**
  * debug: numbered badge. main: the suggested element. alt: one of the top 3 when unsure.
+ * danger: a suggested element that looks like an irreversible final step.
  */
-export type Tone = "debug" | "main" | "alt";
+export type Tone = "debug" | "main" | "alt" | "danger";
 
 export interface Mark {
   element: Element;
@@ -45,7 +46,8 @@ const STYLE = `
 
   .main { outline: 3px solid #1f6feb; box-shadow: 0 0 0 6px rgba(31, 111, 235, 0.25); }
   .alt { outline: 2px dashed #9a6700; }
-  .main .tag, .alt .tag {
+  .danger { outline: 3px solid #cf222e; box-shadow: 0 0 0 6px rgba(207, 34, 46, 0.25); }
+  .main .tag, .alt .tag, .danger .tag {
     /* Above the element; below it when the element is at the top of the window. */
     left: -3px;
     bottom: calc(100% + 6px);
@@ -55,11 +57,12 @@ const STYLE = `
   }
   .main .tag { background: #1f6feb; }
   .alt .tag { background: #9a6700; }
-  .main.edge .tag, .alt.edge .tag { bottom: auto; top: calc(100% + 6px); }
+  .danger .tag { background: #cf222e; }
+  .main.edge .tag, .alt.edge .tag, .danger.edge .tag { bottom: auto; top: calc(100% + 6px); }
 `;
 
 // Room a tag needs outside its element before it moves to the other side.
-const EDGE = { debug: 32, main: 30, alt: 30 } as const;
+const EDGE = { debug: 32, main: 30, alt: 30, danger: 30 } as const;
 
 const stopTracking = new Map<Layer, () => void>();
 

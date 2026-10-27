@@ -5,7 +5,16 @@
 import { buildTestRequest, callJev, JevError, type JevRequest, type JevResult } from "./shared/jev";
 import { isFromExtensionPage, type Message, type SuggestReply, type TestConnectionReply } from "./shared/messages";
 import { loadSettings, originPattern } from "./shared/settings";
-import { buildRankRequests, buildSuggestRequest, MAX_DIRECT_CANDIDATES, parseSuggestion, shortlist } from "./shared/suggest";
+import {
+  buildRankRequests,
+  buildRiskRequest,
+  buildSuggestRequest,
+  highlightedIds,
+  MAX_DIRECT_CANDIDATES,
+  parseRisk,
+  parseSuggestion,
+  shortlist,
+} from "./shared/suggest";
 
 // Clicking the toolbar icon opens the side panel. Called at startup, not only on install,
 // as the chrome.sidePanel docs recommend.
@@ -57,9 +66,10 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * One suggestion for one page. Usually a single Jev call. Pages with more candidates than a
- * Choice can hold are ranked first with batches of Score questions, sent in parallel, and
- * the top of that ranking goes into the usual Choice.
+ * One suggestion for one page: the Choice and its two yes/no checks in one call, then a small
+ * second call asking whether the highlighted elements are irreversible final steps. Pages with
+ * more candidates than a Choice can hold are ranked first with batches of Score questions,
+ * sent in parallel, and the top of that ranking goes into the usual Choice.
  */
 async function suggest({ goal, page, previousSteps }: Extract<Message, { type: "suggest" }>): Promise<SuggestReply> {
   // The key is read here, not passed in, so it never travels through other parts of the extension.
@@ -84,10 +94,16 @@ async function suggest({ goal, page, previousSteps }: Extract<Message, { type: "
       options = shortlist(page.candidates, ranked);
     }
     const result = await ask(buildSuggestRequest(settings.model, goal, page, previousSteps, options));
+    const suggestion = parseSuggestion(result, options, settings.threshold);
+    const ids = highlightedIds(suggestion);
+    if (ids.length > 0) {
+      const risk = await ask(buildRiskRequest(settings.model, goal, page, previousSteps, options, ids));
+      suggestion.irreversible = parseRisk(risk, ids);
+    }
     return {
       ok: true,
       model: result.model,
-      suggestion: parseSuggestion(result, options, settings.threshold),
+      suggestion,
       usage: { calls, inputTokens, latencyMs: Math.round(performance.now() - started) },
     };
   } catch (err) {

@@ -209,3 +209,7 @@ details.card:not([open]) {
 .flag.ok {
   color: var(--ok);
 }
+.flag.danger {
+  color: var(--error);
+  border-color: var(--error);
+}

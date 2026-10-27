@@ -1,28 +1,58 @@
-// Side panel. Stage 3: type a goal, get one suggestion for the current page, highlighted on
-// the page. The Debug section lists the clickable elements found, with optional badges.
-// Recording clicks and suggesting again after each page change comes in stage 4.
+// Side panel. Stage 4: a guided loop. Start suggests the next click; when the person clicks
+// an element, the panel records it, waits for the page to settle (a navigation, or the DOM
+// going quiet), and suggests again, until Jev says the goal is reached or the person stops.
+// The panel only ever suggests: the person does every click.
 
 import type { Candidate, PageSnapshot } from "./content/candidates";
-import type { ContentMessage, HighlightReply, Message, ScanReply, SuggestReply } from "./shared/messages";
+import type { ContentMessage, HighlightReply, Message, PageEvent, ScanReply, SuggestReply } from "./shared/messages";
 import { loadSettings, pagePattern, TYPESAFE_BASE_URL } from "./shared/settings";
-import { FLAG_THRESHOLD, MIN_SHOWN_PROBABILITY, NONE_HERE, type Suggestion } from "./shared/suggest";
+import {
+  FLAG_THRESHOLD,
+  GOAL_DONE_THRESHOLD,
+  highlightedIds,
+  IRREVERSIBLE_THRESHOLD,
+  NONE_HERE,
+  type Suggestion,
+} from "./shared/suggest";
 
 const setup = document.querySelector<HTMLParagraphElement>("#setup")!;
 const openOptions = document.querySelector<HTMLButtonElement>("#open-options")!;
 const goalInput = document.querySelector<HTMLTextAreaElement>("#goal")!;
 const pageLine = document.querySelector<HTMLParagraphElement>("#page")!;
-const suggestButton = document.querySelector<HTMLButtonElement>("#suggest")!;
+const startButton = document.querySelector<HTMLButtonElement>("#start")!;
+const stopButton = document.querySelector<HTMLButtonElement>("#stop")!;
+const allowButton = document.querySelector<HTMLButtonElement>("#allow")!;
+const statusLine = document.querySelector<HTMLParagraphElement>("#status")!;
 const result = document.querySelector<HTMLDivElement>("#result")!;
 const usageLine = document.querySelector<HTMLParagraphElement>("#usage")!;
+const stepsWrap = document.querySelector<HTMLDivElement>("#steps-wrap")!;
+const stepsList = document.querySelector<HTMLOListElement>("#steps")!;
 const scanButton = document.querySelector<HTMLButtonElement>("#scan")!;
 const badgesToggle = document.querySelector<HTMLInputElement>("#badges")!;
 const scanStatus = document.querySelector<HTMLParagraphElement>("#scan-status")!;
 const tableWrap = document.querySelector<HTMLDivElement>("#table-wrap")!;
 const tbody = document.querySelector<HTMLTableSectionElement>("#candidates")!;
 
-// The tab the panel acts on. Tracked ahead of time, not looked up on click, because
-// chrome.permissions.request must be the first await after the click (see ensureAccess).
+// The tab the panel acts on when no session is running. Tracked ahead of time, not looked up
+// on click, because chrome.permissions.request must be the first await after the click.
 let activeTab: chrome.tabs.Tab | undefined;
+
+interface Session {
+  goal: string;
+  /** The guided tab. Fixed at Start, so switching tabs to look something up doesn't derail it. */
+  tabId: number;
+  /** Labels of the elements the person clicked, sent to Jev as previous_steps. */
+  steps: string[];
+  /**
+   * Bumped by every event that makes in-flight work stale (a click, a page load). Each step
+   * remembers the generation it started in and drops its result if a newer one exists.
+   */
+  generation: number;
+}
+
+// Held in the panel, so closing the panel ends the session. Fine for a prototype; a longer
+// flow would keep it in chrome.storage.session.
+let session: Session | null = null;
 
 type Kind = "ok" | "error" | "info";
 
@@ -43,6 +73,12 @@ function percent(p: number): string {
   return `${Math.round(p * 100)}%`;
 }
 
+function describeUrl(url: string | undefined): string {
+  if (!url) return "No page";
+  const { host, pathname } = new URL(url);
+  return host + pathname;
+}
+
 async function renderSetup(): Promise<void> {
   const settings = await loadSettings();
   if (!settings.apiKey) {
@@ -53,16 +89,32 @@ async function renderSetup(): Promise<void> {
   showStatus(setup, `Ready: ${settings.model} via ${where}.`, "ok");
 }
 
+function clearSuggestion(): void {
+  result.replaceChildren();
+  usageLine.textContent = "";
+}
+
 async function refreshActiveTab(): Promise<void> {
   [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = activeTab?.url;
-  pageLine.textContent = url ? `On ${new URL(url).host}${new URL(url).pathname}` : "No page";
-  // Results describe the page they came from; once it changes they're stale.
+  // While guiding, the panel stays on the guided tab; the debug table still follows the active tab.
   tableWrap.hidden = true;
   tbody.replaceChildren();
   showStatus(scanStatus, "", "info");
-  result.replaceChildren();
-  usageLine.textContent = "";
+  if (session) return;
+  pageLine.textContent = `On ${describeUrl(activeTab?.url)}`;
+  clearSuggestion();
+}
+
+function setRunning(running: boolean): void {
+  startButton.hidden = running;
+  stopButton.hidden = !running;
+  goalInput.disabled = running;
+  allowButton.hidden = true;
+}
+
+function renderSteps(steps: string[]): void {
+  stepsList.replaceChildren(...steps.map((label) => el("li", label)));
+  stepsWrap.hidden = steps.length === 0;
 }
 
 /**
@@ -124,90 +176,187 @@ async function scan(): Promise<void> {
   }
 }
 
-/** What to show and highlight for one suggestion. */
+/** Shows one suggestion in the panel and returns the highlight to draw on the page. */
 function renderSuggestion(s: Suggestion, page: PageSnapshot): ContentMessage & { type: "highlight" } {
   const labelOf = (id: string) => page.candidates.find((c) => c.id === id)?.label || "(no label)";
+  const isFinal = (id: string) => (s.irreversible[id] ?? 0) >= IRREVERSIBLE_THRESHOLD;
   const parts: HTMLElement[] = [];
   const marks: (ContentMessage & { type: "highlight" })["marks"] = [];
 
   if (s.goalReached >= FLAG_THRESHOLD) {
     parts.push(el("p", `This page looks like your goal is done (${percent(s.goalReached)} sure).`, "flag ok"));
   }
+  // The loop stops here, so a next step would only contradict the "done" message.
+  if (s.goalReached >= GOAL_DONE_THRESHOLD) {
+    result.replaceChildren(...parts);
+    return { type: "highlight", marks: [] };
+  }
   if (s.needsLogin >= FLAG_THRESHOLD) {
-    parts.push(el("p", `This page asks you to sign in first (${percent(s.needsLogin)} sure).`, "flag"));
+    parts.push(el("p", `This page asks you to sign in first (${percent(s.needsLogin)} sure). Sign in, and Jev Guide will continue.`, "flag"));
   }
 
+  const ids = highlightedIds(s);
   if (s.confident && s.choice === NONE_HERE) {
     parts.push(el("p", `Nothing on this page looks like the next step (${percent(s.confidence)} sure). Try scrolling, or go back.`));
   } else if (s.confident) {
     const line = el("p", "Click ", "answer");
     line.append(el("strong", labelOf(s.choice)), ` (${percent(s.confidence)} confident)`);
     parts.push(line);
-    marks.push({ id: s.choice, text: `Click here · ${percent(s.confidence)}`, tone: "main" });
+    const final = isFinal(s.choice);
+    marks.push({ id: s.choice, text: `${final ? "Final step · " : ""}Click here · ${percent(s.confidence)}`, tone: final ? "danger" : "main" });
   } else {
     const intro = s.choice === NONE_HERE ? "The next step may not be on this page." : "Not sure which is next.";
     parts.push(el("p", `${intro} Confidence ${percent(s.confidence)}. The likeliest options:`));
     const list = el("ol", "", "options");
-    const shown = s.alternatives.filter((a, i) => i === 0 || a.probability >= MIN_SHOWN_PROBABILITY);
-    shown.forEach((a, i) => {
+    ids.forEach((id, i) => {
+      const probability = s.alternatives.find((a) => a.id === id)?.probability ?? 0;
       const item = el("li");
-      item.append(el("strong", labelOf(a.id)), ` · ${percent(a.probability)}`);
+      item.append(el("strong", labelOf(id)), ` · ${percent(probability)}${isFinal(id) ? " · final step" : ""}`);
       list.append(item);
-      marks.push({ id: a.id, text: `Option ${i + 1} · ${percent(a.probability)}`, tone: "alt" });
+      marks.push({ id, text: `Option ${i + 1} · ${percent(probability)}${isFinal(id) ? " · final step" : ""}`, tone: isFinal(id) ? "danger" : "alt" });
     });
     parts.push(list);
+  }
+
+  // A warning, never a block: the page keeps working, and the person decides.
+  const finals = ids.filter(isFinal);
+  if (finals.length > 0) {
+    const worst = Math.max(...finals.map((id) => s.irreversible[id]!));
+    parts.push(
+      el(
+        "p",
+        `Careful: ${finals.length === 1 && s.confident ? "this looks like" : "an option here looks like"} the final step of something that can't be undone (${percent(worst)} sure). Check the details on the page before you click.`,
+        "flag danger",
+      ),
+    );
   }
   result.replaceChildren(...parts);
   return { type: "highlight", marks };
 }
 
-async function suggestNext(): Promise<void> {
-  const goal = goalInput.value.trim();
-  if (!goal) return showStatus(result, "Type what you want to do first.", "error");
-  const tabId = await ensureAccess(result);
-  if (tabId === null) return;
+function startSession(goal: string, tabId: number): void {
+  session = { goal, tabId, steps: [], generation: 0 };
+  setRunning(true);
+  renderSteps([]);
+  requestStep();
+}
 
-  suggestButton.disabled = true;
-  usageLine.textContent = "";
-  showStatus(result, "Reading the page and asking Jev…", "info");
+function stopSession(message: string, kind: Kind): void {
+  const s = session;
+  session = null;
+  setRunning(false);
+  showStatus(statusLine, message, kind);
+  if (s) sendToPage(s.tabId, { type: "clearHighlight" }).catch(() => {});
+}
+
+/** Starts a new step and makes any step still in flight stale. */
+function requestStep(): void {
+  if (!session) return;
+  session.generation += 1;
+  runStep(session, session.generation);
+}
+
+/** One step of the loop: wait for the page to settle, read it, ask Jev, highlight. */
+async function runStep(s: Session, generation: number): Promise<void> {
+  const stale = () => session !== s || s.generation !== generation;
+  allowButton.hidden = true;
   try {
-    const page = await scanPage(tabId);
-    if (page.candidates.length === 0) return showStatus(result, "No clickable elements found on this page.", "error");
+    const tab = await chrome.tabs.get(s.tabId);
+    pageLine.textContent = `Guiding on ${describeUrl(tab.url)}`;
+    const pattern = pagePattern(tab.url);
+    if (!pattern) {
+      return showStatus(statusLine, "Jev Guide can't read this page. Go back, or Stop.", "error");
+    }
+    // A link can lead to a site the person hasn't allowed yet. Asking needs a click (a user
+    // gesture), so the panel offers a button rather than prompting by itself.
+    if (!(await chrome.permissions.contains({ origins: [pattern] }))) {
+      if (stale()) return;
+      allowButton.textContent = `Allow ${new URL(tab.url!).host}`;
+      allowButton.dataset.pattern = pattern;
+      allowButton.hidden = false;
+      return showStatus(statusLine, "This page is on a new site. Allow access so Jev Guide can keep going.", "info");
+    }
 
-    const message: Message = { type: "suggest", goal, page, previousSteps: [] };
+    showStatus(statusLine, "Waiting for the page to settle…", "info");
+    await chrome.scripting.executeScript({ target: { tabId: s.tabId }, files: ["content.js"] });
+    await sendToPage(s.tabId, { type: "waitForQuiet" });
+    if (stale()) return;
+
+    showStatus(statusLine, "Reading the page and asking Jev…", "info");
+    const page = await scanPage(s.tabId);
+    if (stale()) return;
+    if (page.candidates.length === 0) {
+      return showStatus(statusLine, "No clickable elements found on this page.", "error");
+    }
+
+    const message: Message = { type: "suggest", goal: s.goal, page, previousSteps: s.steps };
     const reply: SuggestReply | undefined = await chrome.runtime.sendMessage(message);
-    if (!reply) return showStatus(result, "The background worker didn't respond. Reload the extension.", "error");
-    if (!reply.ok) return showStatus(result, reply.error, "error");
+    if (stale()) return;
+    if (!reply) return showStatus(statusLine, "The background worker didn't respond. Reload the extension.", "error");
+    if (!reply.ok) return showStatus(statusLine, reply.error, "error");
 
-    result.dataset.kind = "";
     const highlight = renderSuggestion(reply.suggestion, page);
     const { calls, inputTokens, latencyMs } = reply.usage;
     usageLine.textContent = `${reply.model} · ${calls} ${calls === 1 ? "call" : "calls"} · ${inputTokens} input tokens · ${latencyMs} ms`;
 
+    if (reply.suggestion.goalReached >= GOAL_DONE_THRESHOLD) {
+      return stopSession(`Done: this page shows your goal is complete (${percent(reply.suggestion.goalReached)} sure).`, "ok");
+    }
     if (highlight.marks.length > 0) {
-      const drawn = await sendToPage<HighlightReply | undefined>(tabId, highlight);
+      const drawn = await sendToPage<HighlightReply | undefined>(s.tabId, highlight);
+      if (stale()) return;
       if (drawn && drawn.missing.length > 0) {
-        result.append(el("p", "The page changed before the highlight was drawn. Suggest again.", "flag"));
+        return showStatus(statusLine, "The page changed before the highlight was drawn. Click Stop and Start to retry.", "error");
       }
     }
+    showStatus(statusLine, "Your turn: click on the page. Jev Guide follows along.", "ok");
   } catch (err) {
-    showStatus(result, `Couldn't read this page: ${(err as Error).message}`, "error");
-  } finally {
-    suggestButton.disabled = false;
+    // A navigation replaces the page mid-step, which makes messages to it fail. The new
+    // page's load starts a fresh step, so only errors from the current step are shown.
+    if (stale()) return;
+    showStatus(statusLine, `Couldn't read this page: ${(err as Error).message}`, "error");
   }
 }
 
+startButton.addEventListener("click", async () => {
+  const goal = goalInput.value.trim();
+  if (!goal) return showStatus(statusLine, "Type what you want to do first.", "error");
+  const tabId = await ensureAccess(statusLine);
+  if (tabId === null) return;
+  clearSuggestion();
+  startSession(goal, tabId);
+});
+stopButton.addEventListener("click", () => stopSession("Stopped.", "info"));
+allowButton.addEventListener("click", async () => {
+  const pattern = allowButton.dataset.pattern;
+  if (!pattern) return;
+  if (await chrome.permissions.request({ origins: [pattern] })) requestStep();
+  else showStatus(statusLine, "Access declined. Go back to the previous site, or Stop.", "error");
+});
 openOptions.addEventListener("click", () => chrome.runtime.openOptionsPage());
-suggestButton.addEventListener("click", () => suggestNext());
-// Enter submits; Shift+Enter adds a line.
+// Enter starts; Shift+Enter adds a line.
 goalInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    suggestButton.click();
+    startButton.click();
   }
 });
 scanButton.addEventListener("click", () => scan());
 badgesToggle.addEventListener("change", () => scan());
+
+// Clicks reported by the content script in the guided tab.
+chrome.runtime.onMessage.addListener((message: PageEvent, sender) => {
+  if (!session || sender.id !== chrome.runtime.id || sender.tab?.id !== session.tabId || sender.frameId !== 0) return false;
+  if (message.type === "clicked") {
+    session.steps.push(message.label || "(no label)");
+    renderSteps(session.steps);
+    clearSuggestion();
+    showStatus(statusLine, "Got your click. Waiting for the page to settle…", "info");
+    // If the click navigates, the load events below take over from this step.
+    requestStep();
+  }
+  return false;
+});
 
 // Re-render when settings are saved, so the panel doesn't need reopening.
 chrome.storage.onChanged.addListener((_changes, area) => {
@@ -215,8 +364,23 @@ chrome.storage.onChanged.addListener((_changes, area) => {
 });
 chrome.tabs.onActivated.addListener(() => refreshActiveTab());
 chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (session && tabId === session.tabId) {
+    if (change.status === "loading") {
+      // The old page is going away: anything in flight is stale until the new one loads.
+      session.generation += 1;
+      clearSuggestion();
+      showStatus(statusLine, "Waiting for the page to load…", "info");
+    } else if (change.status === "complete" || change.url) {
+      // "complete" after a full load; a url change alone is a single-page-app route change.
+      requestStep();
+    }
+    return;
+  }
   // url covers single-page-app route changes; status "loading" covers reloads of the same URL.
   if (tabId === activeTab?.id && (change.url || change.status === "loading")) refreshActiveTab();
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (session && tabId === session.tabId) stopSession("The guided tab was closed.", "info");
 });
 
 renderSetup();

@@ -18,7 +18,14 @@ export type Message =
 export type ContentMessage =
   | { type: "scan"; badges: boolean }
   | { type: "highlight"; marks: { id: string; text: string; tone: Exclude<Tone, "debug"> }[] }
-  | { type: "clearHighlight" };
+  | { type: "clearHighlight" }
+  | { type: "waitForQuiet" };
+
+/**
+ * Content script to the side panel: the person clicked one of the scanned elements. Only real
+ * clicks (event.isTrusted) are reported, so a page script calling element.click() can't fake a step.
+ */
+export type PageEvent = { type: "clicked"; id: string; label: string };
 
 export interface ScanReply {
   page: PageSnapshot;
