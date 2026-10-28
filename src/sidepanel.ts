@@ -13,6 +13,7 @@ import {
   GOAL_DONE_THRESHOLD,
   highlightedIds,
   IRREVERSIBLE_THRESHOLD,
+  MATCH_THRESHOLD,
   NONE_HERE,
   type Suggestion,
 } from "./shared/suggest";
@@ -202,6 +203,9 @@ async function scan(): Promise<void> {
 function renderSuggestion(s: Suggestion, page: PageSnapshot): ContentMessage & { type: "highlight" } {
   const labelOf = (id: string) => page.candidates.find((c) => c.id === id)?.label || "(no label)";
   const isFinal = (id: string) => (s.irreversible[id] ?? 0) >= IRREVERSIBLE_THRESHOLD;
+  // Only asked to matter for final steps: a reversible click on the wrong thing is cheap to undo.
+  const isOffGoal = (id: string) => isFinal(id) && (s.matchesGoal[id] ?? 1) < MATCH_THRESHOLD;
+  const note = (id: string) => (isOffGoal(id) ? " · final step · not your goal?" : isFinal(id) ? " · final step" : "");
   const parts: HTMLElement[] = [];
   const marks: (ContentMessage & { type: "highlight" })["marks"] = [];
 
@@ -227,22 +231,32 @@ function renderSuggestion(s: Suggestion, page: PageSnapshot): ContentMessage & {
     const final = isFinal(s.choice);
     marks.push({ id: s.choice, text: `${final ? "Final step · " : ""}Click here · ${percent(s.confidence)}`, tone: final ? "danger" : "main" });
   } else {
-    const intro = s.choice === NONE_HERE ? "The next step may not be on this page." : "Not sure which is next.";
+    if (s.doubted) {
+      // Jev was confident, but the second check says the click can't be undone and may act on
+      // something other than the goal (a different subscription, say), so it's not shown as the answer.
+      const doubt = el("p", "Jev's top pick, ", "flag danger");
+      doubt.append(
+        el("strong", labelOf(s.choice)),
+        `, can't be undone and may not be the one you mean (${percent(s.matchesGoal[s.choice] ?? 0)} match). Check it against your goal before clicking anything final.`,
+      );
+      parts.push(doubt);
+    }
+    const intro = s.doubted ? "Jev Guide isn't sure." : s.choice === NONE_HERE ? "The next step may not be on this page." : "Not sure which is next.";
     parts.push(el("p", `${intro} Confidence ${percent(s.confidence)}. The likeliest options:`));
     const list = el("ol", "", "options");
     ids.forEach((id, i) => {
       const probability = s.alternatives.find((a) => a.id === id)?.probability ?? 0;
       const item = el("li");
-      item.append(el("strong", labelOf(id)), ` · ${percent(probability)}${isFinal(id) ? " · final step" : ""}`);
+      item.append(el("strong", labelOf(id)), ` · ${percent(probability)}${note(id)}`);
       list.append(item);
-      marks.push({ id, text: `Option ${i + 1} · ${percent(probability)}${isFinal(id) ? " · final step" : ""}`, tone: isFinal(id) ? "danger" : "alt" });
+      marks.push({ id, text: `Option ${i + 1} · ${percent(probability)}${note(id)}`, tone: isFinal(id) ? "danger" : "alt" });
     });
     parts.push(list);
   }
 
   // A warning, never a block: the page keeps working, and the person decides.
   const finals = ids.filter(isFinal);
-  if (finals.length > 0) {
+  if (finals.length > 0 && !s.doubted) {
     const worst = Math.max(...finals.map((id) => s.irreversible[id]!));
     parts.push(
       el(

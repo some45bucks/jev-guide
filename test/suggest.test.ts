@@ -3,6 +3,7 @@ import type { Candidate, PageSnapshot } from "../src/content/candidates";
 import { type HistoryEdge, pageRef } from "../src/shared/history";
 import type { JevResponse } from "../src/shared/jev";
 import {
+  applyRisk,
   buildRankRequests,
   buildRiskRequest,
   buildSuggestRequest,
@@ -10,10 +11,11 @@ import {
   MAX_DIRECT_CANDIDATES,
   highlightedIds,
   NONE_HERE,
-  parseRisk,
   parseSuggestion,
   RANK_BATCH_SIZE,
+  riskIds,
   shortlist,
+  type Suggestion,
 } from "../src/shared/suggest";
 
 function candidate(n: number, label: string, href: string | null = null, role = "link"): Candidate {
@@ -186,7 +188,7 @@ describe("parseSuggestion", () => {
 });
 
 describe("highlightedIds", () => {
-  const base = { confidence: 0.9, goalReached: 0, needsLogin: 0, irreversible: {} };
+  const base = { confidence: 0.9, goalReached: 0, needsLogin: 0, irreversible: {}, matchesGoal: {}, doubted: false };
   const alternatives = [
     { id: "e1", probability: 0.45 },
     { id: "e2", probability: 0.3 },
@@ -204,28 +206,66 @@ describe("highlightedIds", () => {
   });
 });
 
-describe("buildRiskRequest and parseRisk", () => {
+describe("buildRiskRequest", () => {
   const request = buildRiskRequest("jev-latest", "Cancel my subscription", billing, [], billing.candidates, ["e3", "e2"]);
 
-  it("asks one noul per highlighted element about the final, irreversible step", () => {
-    expect(Object.keys(request.questions)).toEqual(["irreversible_e3", "irreversible_e2"]);
-    const q = request.questions.irreversible_e3;
-    expect(q?.type).toBe("noul");
-    expect(q?.instructions).toContain("`elements.e3`");
-    expect(q?.instructions).toContain("final confirmation step");
+  it("asks two nouls per element: irreversible final step, and whether it matches the goal", () => {
+    expect(Object.keys(request.questions)).toEqual(["irreversible_e3", "matches_goal_e3", "irreversible_e2", "matches_goal_e2"]);
+    expect(request.questions.irreversible_e3?.instructions).toContain("final confirmation step");
+    expect(request.questions.matches_goal_e3?.instructions).toContain("`goal` exactly");
   });
 
   it("keeps the same state as the suggestion, so the page context is there", () => {
     expect((request.state as { elements: object }).elements).toHaveProperty("e3", "link: Cancel subscription → /cancel.html");
   });
+});
 
-  it("reads the probabilities back by element id", () => {
-    const response: JevResponse = {
+describe("riskIds and applyRisk", () => {
+  const confidentPick: Suggestion = {
+    choice: "e3",
+    confidence: 0.96,
+    confident: true,
+    alternatives: [
+      { id: "e3", probability: 0.96 },
+      { id: "e1", probability: 0.03 },
+      { id: "e2", probability: 0.01 },
+    ],
+    goalReached: 0,
+    needsLogin: 0,
+    irreversible: {},
+    matchesGoal: {},
+    doubted: false,
+  };
+  function risk(irreversible: number, matches: number): JevResponse {
+    return {
       model: "jev-1.14.0",
       inputTokens: 600,
-      answers: { irreversible_e3: { type: "noul", noul: 0.87 }, irreversible_e2: { type: "noul", noul: 0.08 } },
+      answers: { irreversible_e3: { type: "noul", noul: irreversible }, matches_goal_e3: { type: "noul", noul: matches } },
     };
-    expect(parseRisk(response, ["e3", "e2"])).toEqual({ e3: 0.87, e2: 0.08 });
-    expect(() => parseRisk(response, ["e1"])).toThrow(/missing/);
+  }
+
+  it("checks the choice and the alternatives the panel could fall back to", () => {
+    expect(riskIds(confidentPick)).toEqual(["e3"]);
+    expect(riskIds({ ...confidentPick, alternatives: [{ id: "e3", probability: 0.7 }, { id: "e1", probability: 0.2 }] })).toEqual(["e3", "e1"]);
+    expect(riskIds({ ...confidentPick, choice: NONE_HERE, alternatives: [{ id: "e1", probability: 0.3 }] })).toEqual(["e1"]);
+  });
+
+  it("keeps a confident final step that matches the goal", () => {
+    const s = applyRisk(confidentPick, risk(0.87, 0.97), ["e3"]);
+    expect(s).toMatchObject({ confident: true, doubted: false, irreversible: { e3: 0.87 }, matchesGoal: { e3: 0.97 } });
+  });
+
+  it("doubts a confident final step on the wrong thing, like cancelling a different subscription", () => {
+    // Shaped like the hard fixture's channel trap: irreversible, but 0.36 match for "Cancel my Plus subscription".
+    const s = applyRisk(confidentPick, risk(0.96, 0.36), ["e3"]);
+    expect(s).toMatchObject({ confident: false, doubted: true });
+  });
+
+  it("doesn't doubt a reversible click, even if it doesn't match", () => {
+    expect(applyRisk(confidentPick, risk(0.1, 0.2), ["e3"])).toMatchObject({ confident: true, doubted: false });
+  });
+
+  it("fails loudly when an answer is missing", () => {
+    expect(() => applyRisk(confidentPick, risk(0.9, 0.9), ["e3", "e1"])).toThrow(/irreversible_e1/);
   });
 });

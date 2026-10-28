@@ -72,26 +72,48 @@ export function recordArrival(
 
 /**
  * Elements that shouldn't be suggested again on `here`:
- * - clicked from this page, led somewhere else, and the person came back here (a dead end);
- * - clicked from this page MAX_NO_CHANGE_CLICKS times without the page changing (a loop).
- * One click without a change is allowed again, since retrying can be right; a visible error
- * message changes the headings, which makes it a different page anyway.
+ * - a dead end: clicked from this page, and the person came straight back from the page it
+ *   opened (Back, a breadcrumb), so that page didn't have what they needed;
+ * - a retreat: clicked from this page, and it led back to a page first visited before this
+ *   one, such as a "Cancel" button that cancels the flow rather than the subscription;
+ * - a loop: clicked from this page MAX_NO_CHANGE_CLICKS times without the page changing.
+ *
+ * "Came straight back" matters on long detours. In P → Q → R → P, the click that left P was
+ * fine and the one that closed the circle (R → P) was the mistake; holding back the first
+ * would block the right path. One click without a change is allowed again, since retrying can
+ * be right, and a visible error message changes the headings, which makes it another page.
  */
 export function triedWithoutProgress(history: HistoryEdge[], here: PageRef): ElementRef[] {
   const result: ElementRef[] = [];
   const add = (e: ElementRef) => {
     if (!result.some((r) => sameElement(r, e))) result.push(e);
   };
+  const order = firstVisitOrder(history);
   history.forEach((edge, i) => {
     if (!edge.element || !samePage(edge.from, here)) return;
-    if (samePage(edge.to, here)) {
+    const opened = edge.to;
+    if (samePage(opened, here)) {
       const repeats = history.filter((h) => h.element && sameElement(h.element, edge.element!) && samePage(h.from, here) && samePage(h.to, here));
       if (repeats.length >= MAX_NO_CHANGE_CLICKS) add(edge.element);
-    } else if (history.slice(i + 1).some((later) => samePage(later.to, here))) {
-      add(edge.element);
+      return;
     }
+    const retreat = order(opened) < order(edge.from);
+    // The first move that actually left the opened page (clicks that changed nothing don't count).
+    const leftBy = history.slice(i + 1).find((e) => samePage(e.from, opened) && !samePage(e.to, opened));
+    if (retreat || (leftBy && samePage(leftBy.to, here))) add(edge.element);
   });
   return result;
+}
+
+/** Position of each page's first visit along the path, for telling backward moves from forward ones. */
+function firstVisitOrder(history: HistoryEdge[]): (page: PageRef) => number {
+  const seen: PageRef[] = [];
+  for (const edge of history) {
+    for (const page of [edge.from, edge.to]) {
+      if (!seen.some((p) => samePage(p, page))) seen.push(page);
+    }
+  }
+  return (page) => seen.findIndex((p) => samePage(p, page));
 }
 
 /** Splits the candidates into those Jev may choose from and those held back. Never holds back all of them. */

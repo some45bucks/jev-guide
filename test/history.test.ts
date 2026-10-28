@@ -72,6 +72,20 @@ describe("triedWithoutProgress", () => {
     expect(triedWithoutProgress(history, home)).toEqual([accountLink, settingsLink]);
   });
 
+  it("holds back a click that led back to a page visited earlier, like a Cancel that cancels the flow", () => {
+    const plus: PageRef = { path: "/plus", title: "Plus", headings: ["Plus"] };
+    const end1: PageRef = { path: "/end-1", title: "Before you go", headings: ["Before you go"] };
+    const end2: PageRef = { path: "/end-2", title: "Pause instead?", headings: ["Pause instead?"] };
+    const endLink: ElementRef = { role: "link", label: "End membership", href: "/end-1" };
+    const continueLink: ElementRef = { role: "link", label: "Continue to cancel", href: "/end-2" };
+    const cancelFlow: ElementRef = { role: "link", label: "Cancel", href: "/plus" };
+    const history = [click(plus, endLink, end1), click(end1, continueLink, end2), click(end2, cancelFlow, plus), click(plus, endLink, end1), click(end1, continueLink, end2)];
+    expect(triedWithoutProgress(history, end2)).toEqual([cancelFlow]);
+    // The long way round doesn't make the right links look like dead ends.
+    expect(triedWithoutProgress(history, plus)).toEqual([]);
+    expect(triedWithoutProgress(history, end1)).toEqual([]);
+  });
+
   it("doesn't hold back a click on the way forward", () => {
     expect(triedWithoutProgress([click(home, accountLink, account)], account)).toEqual([]);
     expect(triedWithoutProgress([click(home, accountLink, account)], home)).toEqual([]);

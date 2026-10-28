@@ -7,13 +7,13 @@ import { buildTestRequest, callJev, JevError, type JevRequest, type JevResult } 
 import { isFromExtensionPage, type Message, type SuggestReply, type TestConnectionReply } from "./shared/messages";
 import { loadSettings, originPattern } from "./shared/settings";
 import {
+  applyRisk,
   buildRankRequests,
   buildRiskRequest,
   buildSuggestRequest,
-  highlightedIds,
   MAX_DIRECT_CANDIDATES,
-  parseRisk,
   parseSuggestion,
+  riskIds,
   shortlist,
 } from "./shared/suggest";
 
@@ -68,7 +68,8 @@ function errorMessage(err: unknown): string {
 
 /**
  * One suggestion for one page: the Choice and its two yes/no checks in one call, then a small
- * second call asking whether the highlighted elements are irreversible final steps. Pages with
+ * second call asking whether the elements it may highlight are irreversible final steps, and
+ * whether they act on what the goal names. Pages with
  * more candidates than a Choice can hold are ranked first with batches of Score questions,
  * sent in parallel, and the top of that ranking goes into the usual Choice.
  */
@@ -98,11 +99,11 @@ async function suggest({ goal, page, history }: Extract<Message, { type: "sugges
       options = shortlist(usable, ranked);
     }
     const result = await ask(buildSuggestRequest(settings.model, goal, page, history, options));
-    const suggestion = parseSuggestion(result, options, settings.threshold);
-    const ids = highlightedIds(suggestion);
+    let suggestion = parseSuggestion(result, options, settings.threshold);
+    const ids = riskIds(suggestion);
     if (ids.length > 0) {
       const risk = await ask(buildRiskRequest(settings.model, goal, page, history, options, ids));
-      suggestion.irreversible = parseRisk(risk, ids);
+      suggestion = applyRisk(suggestion, risk, ids);
     }
     return {
       ok: true,

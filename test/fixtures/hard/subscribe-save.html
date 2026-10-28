@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Your Subscribe & Save subscriptions – Shopwise</title>
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="logo" href="index.html" aria-label="Shopwise home">shop<span>wise</span></a>
+      <form class="search" onsubmit="event.preventDefault()"><input aria-label="Search Shopwise" placeholder="Search Shopwise" /><button type="submit">Search</button></form>
+      <a href="account.html"><small>Hello, Alex</small>Account &amp; Lists</a>
+      <a href="orders.html"><small>Returns</small>&amp; Orders</a>
+      <a href="cart.html">Cart</a>
+    </header>
+    <nav class="nav">
+      <a href="deals.html">Today's Deals</a>
+      <a href="video.html">Plus Video</a>
+      <a href="subscribe-save.html">Subscribe &amp; Save</a>
+      <a href="help.html">Customer Service</a>
+      <a href="gift-cards.html">Gift Cards</a>
+      <a href="buy-again.html">Buy Again</a>
+    </nav>
+    <main>
+      <p class="crumbs"><a href="account.html">Your Account</a> › Subscribe &amp; Save</p>
+      <section class="panel">
+        <h1>Your Subscribe &amp; Save subscriptions</h1>
+        <div class="item">
+          <h3>Colombian coffee beans · $12.49 every month</h3>
+          <div class="row"><button class="btn" onclick="document.getElementById('toast').textContent='Test site: no delivery was skipped'">Skip next delivery</button><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing changed'">Change frequency</button><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing was cancelled'">Cancel subscription</button></div>
+        </div>
+        <div class="item">
+          <h3>Paper towels, 12 rolls · $18.99 every 2 months</h3>
+          <div class="row"><button class="btn" onclick="document.getElementById('toast').textContent='Test site: no delivery was skipped'">Skip next delivery</button><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing changed'">Change frequency</button><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing was cancelled'">Cancel subscription</button></div>
+        </div>
+        <div class="item">
+          <h3>Dog food, 30 lb · $54.99 every 6 weeks</h3>
+          <div class="row"><button class="btn" onclick="document.getElementById('toast').textContent='Test site: no delivery was skipped'">Skip next delivery</button><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing changed'">Change frequency</button><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing was cancelled'">Cancel subscription</button></div>
+        </div>
+      </section>
+      <p id="toast" class="note" role="status"></p>
+    </main>
+    <footer>
+      <a href="account.html">Your Account</a><a href="orders.html">Your Orders</a><a href="help.html">Help</a>
+      <p>Shopwise is a fictional test site for Jev Guide. Nothing here is real, and no button charges or cancels anything.</p>
+    </footer>
+  </body>
+</html>

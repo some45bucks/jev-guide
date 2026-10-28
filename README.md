@@ -10,6 +10,24 @@ yes/no, score) about a state instead of generating text.
 > Status: stage 4 of 7. Type a goal and press Start: Jev Guide highlights the next element, follows
 > your clicks across pages, warns before irreversible final steps, and stops when the goal is done.
 
+## Demo
+
+Both recordings use the real extension on the test sites in `test/fixtures/`, with the person's
+clicks made by a script that follows whatever the panel says. The panel is shown beside the page,
+and captions describe what the panel showed at each step.
+
+**Easy mode:** "Cancel my subscription" on a small streaming site: Account → Billing → the small
+grey cancel link → the final button, outlined in red as a step that can't be undone.
+
+![Easy mode: Jev Guide guides Account, Billing, and the cancel link, then flags the final button in red](docs/easy-mode.gif)
+
+**Hard mode:** "Cancel my Plus subscription" on a store where many things are called a
+subscription. Jev takes two wrong turns (Subscribe & Save, then Plus Video), is 96% sure about
+cancelling a video channel, which the goal check shows as a doubt instead, backtracks with the
+wrong turn held back, and then finds the buried path through three retention pages.
+
+![Hard mode: two wrong turns, a doubted cancel of the wrong subscription, a backtrack, and the buried cancel path](docs/hard-mode.gif)
+
 ## Build and load
 
 Requires Node.js 20 or newer and Chrome 116 or newer.
@@ -42,6 +60,13 @@ panel follows along. The final Cancel button is outlined in red as an irreversib
 nothing when clicked. The **Debug** section lists every clickable element found, and **Show
 numbered badges** numbers them on the page. The home page includes a section of elements the
 extension should skip (hidden, zero-size, disabled).
+
+**Hard mode:** http://127.0.0.1:8123/hard/ is "Shopwise", a fictional store built to mislead.
+Try the goal "Cancel my Plus subscription". Many things are called a subscription (Subscribe &
+Save deliveries, Music and Reading memberships, Plus Video channels, each with its own Cancel
+button), the real path is buried under "Update, cancel and more", and three retention pages push
+back, one with a "Cancel" button that cancels the cancellation. Recorded runs needed about 10
+clicks, with two wrong turns and a backtrack.
 
 After changing code, run `npm run build` again and click the reload icon on the extension's card in
 `chrome://extensions`. `npm run watch` rebuilds on every save. You still reload the extension yourself.
@@ -105,11 +130,17 @@ One Jev call per page, made by the background worker (`src/shared/suggest.ts`):
    in place, in which case the content script waits until the DOM has been quiet for 500 ms
    (at most 4 s, for pages with clocks or carousels).
 2. **Read the page and ask Jev** (one call, as above).
-3. **Check the highlight for irreversibility.** Whether a click can be undone depends on which
-   element was chosen, so this is a second, small call: one noul per highlighted element, "Is
-   `elements.eN` the final confirmation step of an action that can't be undone, such as cancelling,
-   deleting, paying or sending?". At 0.5 or more the element is outlined in red with a "Final step"
-   tag and the panel shows a warning. It never blocks the click.
+3. **Check the highlight.** These questions depend on which element was chosen, so they're a
+   second, small call with two nouls for each element the panel may highlight:
+   - "Is `elements.eN` the final confirmation step of an action that can't be undone, such as
+     cancelling, deleting, paying or sending?" At 0.5 or more the element is outlined in red with
+     a "Final step" tag and the panel shows a warning. It never blocks the click.
+   - "Does `elements.eN` match `goal` exactly, including which subscription, product or account it
+     applies to?" A confident pick that is irreversible and scores below 0.5 here is shown as a
+     doubt with options, not as "Click here". This catches the worst mistake: confidently
+     cancelling the wrong thing. On the hard site, Jev was 96% sure about cancelling a video
+     channel for "Cancel my Plus subscription"; this check scored it 0.36 to 0.44, while real final
+     steps scored 0.71 or more.
 4. **Record the click.** The content script listens for clicks in the capture phase without
    calling `preventDefault`, so the page always gets the click. It reports only clicks on scanned
    elements with `event.isTrusted`, so a page script calling `element.click()` can't fake a step.
@@ -146,13 +177,23 @@ Jev given only the history doesn't reliably avoid repeating itself. Tried on six
 remaining option at confidence 0.26 to 0.38, and other wordings walked back into a dead end. So
 the code holds back two kinds of element before asking Jev, and the panel lists what it held back:
 
-- **Dead ends:** clicked from this page, led somewhere else, and the person came back here.
+- **Dead ends:** clicked from this page, and the person came straight back from the page it opened.
+- **Retreats:** clicked from this page, and it led back to a page first visited before this one,
+  like a "Cancel" button that cancels the flow rather than the subscription.
 - **Loops:** clicked from this page twice without the page changing.
+
+"Came straight back" matters on long detours: in Plus → End membership → … → Cancel → Plus, the
+mistake is the Cancel that closed the circle, not the End membership link that started it.
 
 One click that leaves the page unchanged is allowed again, because retrying can be right, and an
 error message changes the headings, which makes it a different page anyway. A wizard's Next
 button leads to a new page each time, so it's never held back. If every element would be held
 back, none is.
+
+Known weakness: the irreversibility check over-warns on retention pages. On the hard site every
+"Continue to cancel" link was flagged as a final step (96% to 100%), though only the last button
+ends the membership. Too many red warnings teach people to ignore them; benchmark data (stage 6)
+should decide whether to tighten the wording or the threshold.
 
 Not covered yet: closing the side panel ends the session, because the panel holds it (a longer
 flow would keep it in `chrome.storage.session`).
@@ -171,8 +212,10 @@ Found by `src/content/candidates.ts`, in DOM order:
 - **Label:** `aria-label`, then `aria-labelledby`, then a submit button's caption, then visible
   text, then `title`, then image `alt`. Plus the role, and the link's path without its query string
   or fragment, which often carry tokens or personal data.
-- **Deduplicated:** controls with the same role, label and link (header and footer "Account")
-  appear once.
+- **Deduplicated:** links with the same role, label and destination (header and footer "Account")
+  appear once. Repeated action buttons are kept apart instead, each labelled with its section
+  heading ("Cancel subscription · Colombian coffee beans · $12.49 every month"), because five
+  identical Cancel buttons cancel five different things.
 - **Never read:** the value of any input. A submit button's caption comes from its `value`
   attribute, which the page author wrote; typed text lives in the value property, which is never
   touched.

@@ -229,17 +229,47 @@ export function extractCandidates(doc: Document, layout: Layout = browserLayout)
     if (!label && !href) continue;
 
     const role = roleOf(el);
-    // The same control repeated (header and footer "Account" links) is one option for Jev.
-    const key = `${role}|${label}|${href}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    // Links to the same place (header and footer "Account") are interchangeable, so they're one
+    // option for Jev. Repeated action buttons are not: five "Cancel subscription" buttons cancel
+    // five different things, so they're all kept and told apart below.
+    if (href !== null) {
+      const key = `${role}|${label}|${href}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
 
     const { x, y, width, height } = layout.rectOf(el);
     candidates.push({ id: `e${candidates.length + 1}`, role, label, href, rect: { x, y, width, height } });
     elements.push(el);
     lastControl = el;
   }
+  addContextToRepeats(candidates, elements);
   return { candidates, elements };
+}
+
+/** Appends the section heading to action buttons that share a label, so Jev can tell them apart. */
+function addContextToRepeats(candidates: Candidate[], elements: Element[]): void {
+  const count = new Map<string, number>();
+  for (const c of candidates) {
+    if (c.href === null) count.set(`${c.role}|${c.label}`, (count.get(`${c.role}|${c.label}`) ?? 0) + 1);
+  }
+  candidates.forEach((c, i) => {
+    if (c.href !== null || (count.get(`${c.role}|${c.label}`) ?? 0) < 2) return;
+    const context = sectionHeading(elements[i]!);
+    if (context) c.label = `${c.label} · ${truncate(context)}`;
+  });
+}
+
+// Node.DOCUMENT_POSITION_FOLLOWING, spelled out because the tests run without browser globals.
+const FOLLOWING = 4;
+
+/** The closest heading before `el` within its nearest ancestor that has one: the section it belongs to. */
+function sectionHeading(el: Element): string {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const before = [...node.querySelectorAll("h1, h2, h3, h4, h5, h6")].filter((h) => h.compareDocumentPosition(el) & FOLLOWING);
+    if (before.length > 0) return visibleText(before[before.length - 1]!);
+  }
+  return "";
 }
 
 export function extractHeadings(doc: Document, layout: Layout = browserLayout): string[] {

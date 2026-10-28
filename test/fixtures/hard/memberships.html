@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Memberships & Subscriptions – Shopwise</title>
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="logo" href="index.html" aria-label="Shopwise home">shop<span>wise</span></a>
+      <form class="search" onsubmit="event.preventDefault()"><input aria-label="Search Shopwise" placeholder="Search Shopwise" /><button type="submit">Search</button></form>
+      <a href="account.html"><small>Hello, Alex</small>Account &amp; Lists</a>
+      <a href="orders.html"><small>Returns</small>&amp; Orders</a>
+      <a href="cart.html">Cart</a>
+    </header>
+    <nav class="nav">
+      <a href="deals.html">Today's Deals</a>
+      <a href="video.html">Plus Video</a>
+      <a href="subscribe-save.html">Subscribe &amp; Save</a>
+      <a href="help.html">Customer Service</a>
+      <a href="gift-cards.html">Gift Cards</a>
+      <a href="buy-again.html">Buy Again</a>
+    </nav>
+    <main>
+      <p class="crumbs"><a href="account.html">Your Account</a> › Memberships &amp; Subscriptions</p>
+      <section class="panel">
+        <h1>Memberships &amp; Subscriptions</h1>
+        <div class="item">
+          <h3>Music Unlimited · $10.99 a month</h3>
+          <div class="row"><a class="btn" href="music.html">Manage subscription</a><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing was cancelled'">Cancel subscription</button></div>
+        </div>
+        <div class="item">
+          <h3>Reading Unlimited · $11.99 a month</h3>
+          <div class="row"><a class="btn" href="reading.html">Manage subscription</a><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing was cancelled'">Cancel subscription</button></div>
+        </div>
+        <div class="item">
+          <h3>Plus Video Channel: Paramount+ · $7.99 a month</h3>
+          <div class="row"><a class="btn" href="video.html">Manage channel</a><button class="btn" onclick="document.getElementById('toast').textContent='Test site: nothing was cancelled'">Cancel subscription</button></div>
+        </div>
+        <p class="note">Plus membership isn't listed here.</p>
+      </section>
+      <p id="toast" class="note" role="status"></p>
+    </main>
+    <footer>
+      <a href="account.html">Your Account</a><a href="orders.html">Your Orders</a><a href="help.html">Help</a>
+      <p>Shopwise is a fictional test site for Jev Guide. Nothing here is real, and no button charges or cancels anything.</p>
+    </footer>
+  </body>
+</html>

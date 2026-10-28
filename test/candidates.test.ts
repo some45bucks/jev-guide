@@ -107,6 +107,20 @@ describe("extractCandidates", () => {
     expect(candidates[0]).toMatchObject({ role: "link", label: "Go", href: "/go" });
   });
 
+  it("keeps repeated action buttons apart by their section heading", () => {
+    const { candidates } = scan(`
+      <section><h2>Colombian coffee beans · $12.49 every month</h2><button>Skip next delivery</button><button>Cancel subscription</button></section>
+      <section><h2>Paper towels · $18.99 every 2 months</h2><button>Cancel subscription</button></section>
+      <button>Help</button>
+    `);
+    expect(candidates.map((c) => c.label)).toEqual([
+      "Skip next delivery",
+      "Cancel subscription · Colombian coffee beans · $12.49 every month",
+      "Cancel subscription · Paper towels · $18.99 every 2 months",
+      "Help",
+    ]);
+  });
+
   it("merges repeated controls with the same role, label and link", () => {
     const { candidates } = scan('<a href="/account">Account</a><p>…</p><a href="/account">Account</a>');
     expect(candidates).toHaveLength(1);

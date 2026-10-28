@@ -31,6 +31,8 @@ export const FLAG_THRESHOLD = 0.5;
 export const MIN_SHOWN_PROBABILITY = 0.05;
 /** From this probability a highlighted element is shown in red as a final, irreversible step. */
 export const IRREVERSIBLE_THRESHOLD = 0.5;
+/** Below this, an irreversible step is judged not to act on the thing the goal names. */
+export const MATCH_THRESHOLD = 0.5;
 /**
  * The guided loop stops once goal_reached is this high. Stricter than FLAG_THRESHOLD because
  * stopping too early leaves the person without guidance, while one extra suggestion costs little.
@@ -154,10 +156,17 @@ export interface Suggestion {
   /** Probability that the page asks the person to sign in. */
   needsLogin: number;
   /**
-   * For each element the panel will highlight: probability that clicking it is the final step
+   * For each element the panel may highlight: probability that clicking it is the final step
    * of something that can't be undone. Filled in by a second request (see buildRiskRequest).
    */
   irreversible: Record<string, number>;
+  /** For the same elements: probability that the element acts on exactly what the goal names. */
+  matchesGoal: Record<string, number>;
+  /**
+   * True when a confident pick was turned into "not sure" because it's irreversible and
+   * doesn't seem to act on what the goal names (say, cancelling a different subscription).
+   */
+  doubted: boolean;
 }
 
 export function parseSuggestion(response: JevResponse, candidates: Candidate[], threshold: number): Suggestion {
@@ -186,6 +195,8 @@ export function parseSuggestion(response: JevResponse, candidates: Candidate[], 
     goalReached: reached.noul,
     needsLogin: login.noul,
     irreversible: {},
+    matchesGoal: {},
+    doubted: false,
   };
 }
 
@@ -196,9 +207,28 @@ export function highlightedIds(s: Suggestion): string[] {
 }
 
 /**
- * The irreversibility check. It depends on which element was chosen, so it can't share the
- * first request; it's a second, small request with one noul per highlighted element. Asking
- * about every element up front would avoid the wait but cost a question per element.
+ * Elements to check in the second request: every element the panel might highlight, the choice
+ * and the likely alternatives, so a confident pick can still fall back to the alternatives.
+ */
+export function riskIds(s: Suggestion): string[] {
+  const ids = highlightedIds({ ...s, confident: false });
+  return s.choice !== NONE_HERE && !ids.includes(s.choice) ? [s.choice, ...ids] : ids;
+}
+
+/**
+ * The second request: two nouls per element that may be highlighted. They depend on which
+ * elements were chosen, so they can't share the first request. Asking about every element up
+ * front would avoid the wait but cost questions per element.
+ *
+ * Irreversibility asks about the *final confirmation* step. Tried on the fixture pages, it scored
+ * the real Cancel button 0.87 and Delete account 0.89, harmless controls 0.08 or less, and the
+ * link that only opens the confirmation page 0.53 (a warning one step early, the safe side).
+ * Asking "will it change something without confirming first" missed both real final steps.
+ *
+ * The goal match catches the worst mistake: a confident, irreversible click on the wrong thing,
+ * such as cancelling a video channel when the goal was the store membership. On the hard
+ * fixture, this wording scored those traps 0.36 or less and real final steps 0.71 or more; a
+ * looser "is it the same thing the goal is about?" put the channel trap at 0.49.
  *
  * The wording asks about the *final confirmation* step. Tried on the fixture pages, it scored
  * the real Cancel button 0.87 and Delete account 0.89, harmless controls 0.08 or less, and the
@@ -217,23 +247,39 @@ export function buildRiskRequest(
     model,
     state: baseState(goal, page, history, candidates),
     questions: Object.fromEntries(
-      ids.map((id) => [
-        `irreversible_${id}`,
-        {
-          type: "noul" as const,
-          instructions: `Is \`elements.${id}\` the final confirmation step of an action that can't be undone, such as cancelling, deleting, paying or sending?`,
-        },
+      ids.flatMap((id) => [
+        [
+          `irreversible_${id}`,
+          {
+            type: "noul" as const,
+            instructions: `Is \`elements.${id}\` the final confirmation step of an action that can't be undone, such as cancelling, deleting, paying or sending?`,
+          },
+        ],
+        [
+          `matches_goal_${id}`,
+          {
+            type: "noul" as const,
+            instructions: `Does \`elements.${id}\` match \`goal\` exactly, including which subscription, product or account it applies to?`,
+          },
+        ],
       ]),
     ),
   };
 }
 
-export function parseRisk(response: JevResponse, ids: string[]): Record<string, number> {
-  return Object.fromEntries(
-    ids.map((id) => {
-      const answer = response.answers[`irreversible_${id}`];
-      if (answer?.type !== "noul") throw new JevError(`The irreversibility answer for ${id} is missing.`);
-      return [id, answer.noul];
-    }),
-  );
+/** Reads the second request's answers into the suggestion, and doubts a confident pick if needed. */
+export function applyRisk(s: Suggestion, response: JevResponse, ids: string[]): Suggestion {
+  const read = (key: string) => {
+    const answer = response.answers[key];
+    if (answer?.type !== "noul") throw new JevError(`The answer "${key}" is missing.`);
+    return answer.noul;
+  };
+  const irreversible = Object.fromEntries(ids.map((id) => [id, read(`irreversible_${id}`)]));
+  const matchesGoal = Object.fromEntries(ids.map((id) => [id, read(`matches_goal_${id}`)]));
+  const doubted =
+    s.confident &&
+    s.choice !== NONE_HERE &&
+    (irreversible[s.choice] ?? 0) >= IRREVERSIBLE_THRESHOLD &&
+    (matchesGoal[s.choice] ?? 1) < MATCH_THRESHOLD;
+  return { ...s, irreversible, matchesGoal, doubted, confident: s.confident && !doubted };
 }
